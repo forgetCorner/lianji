@@ -32,7 +32,7 @@ import { TrainingPlanView } from "@/components/training-plan-view";
 import { ActiveWorkoutView, WorkoutRestOverlay } from "@/components/active-workout-view";
 import type { SetInput } from "@/components/active-workout-view";
 
-type View = "today" | "plan" | "history" | "ranking" | "profile" | "workout";
+type View = "today" | "plan" | "ranking" | "profile" | "workout";
 type FrequencyPeriod = "year" | "12w" | "4w";
 
 type AuthUser = { id: string; username: string; displayName: string; createdAt: number };
@@ -152,7 +152,6 @@ function Sidebar({ view, setView, onAccount, user }: { view: View; setView: (vie
       <nav className="side-nav" aria-label="主导航">
         <NavButton active={view === "today" || view === "workout"} label="今日" onClick={() => setView("today")} icon={<Dumbbell size={23} />} />
         <NavButton active={view === "plan"} label="计划" onClick={() => setView("plan")} icon={<CalendarRange size={23} />} />
-        <NavButton active={view === "history"} label="历史" onClick={() => setView("history")} icon={<History size={23} />} />
         <NavButton active={view === "ranking"} label="排行" onClick={() => setView("ranking")} icon={<Trophy size={23} />} />
         <NavButton active={view === "profile"} label="我的" onClick={() => setView("profile")} icon={<UserRound size={23} />} />
       </nav>
@@ -169,7 +168,6 @@ function MobileNav({ view, setView }: { view: View; setView: (view: View) => voi
     <nav className="mobile-nav" aria-label="移动端主导航">
       <NavButton active={view === "today" || view === "workout"} label="今日" onClick={() => setView("today")} icon={<Dumbbell size={21} />} />
       <NavButton active={view === "plan"} label="计划" onClick={() => setView("plan")} icon={<CalendarRange size={21} />} />
-      <NavButton active={view === "history"} label="历史" onClick={() => setView("history")} icon={<History size={21} />} />
       <NavButton active={view === "ranking"} label="排行" onClick={() => setView("ranking")} icon={<Trophy size={21} />} />
       <NavButton active={view === "profile"} label="我的" onClick={() => setView("profile")} icon={<UserRound size={21} />} />
     </nav>
@@ -319,7 +317,7 @@ function Heatmap({ activity, period, syncedAt }: { activity: DashboardData["acti
   );
 }
 
-function HistoryView({ dashboard }: { dashboard: DashboardData }) {
+function ProfileView({ dashboard, onAccount }: { dashboard: DashboardData; onAccount: () => void }) {
   const [period, setPeriod] = useState<FrequencyPeriod>("year");
   const periodConfig = frequencyPeriods.find((item) => item.id === period) ?? frequencyPeriods[0];
   const periodStart = period === "year" ? startOfCalendarYear(dashboard.syncedAt) : startOfFrequencyRange(dashboard.syncedAt, periodConfig.weeks);
@@ -335,16 +333,19 @@ function HistoryView({ dashboard }: { dashboard: DashboardData }) {
     return date.toISOString().slice(0, 10);
   })).size;
   return (
-    <section className="history-view page-view" data-testid="history-view">
+    <section className="profile-view page-view" data-testid="profile-view">
       <header className="page-header">
-        <div><span className="eyebrow">HISTORY / PROGRESS</span><h1>历史与进步</h1><p>看见训练留下的轨迹，而不只是今天的数字</p></div>
-        <div className="year"><CalendarDays size={20} /><strong>{new Date().getFullYear()}</strong><small>{new Date(dashboard.syncedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 同步</small></div>
+        <div><span className="eyebrow">MY TRAINING</span><h1>我的训练</h1><p>频率、记录与力量变化，都集中在这里。</p></div>
+        <div className="profile-header-actions">
+          <div className="year"><CalendarDays size={20} /><strong>{new Date().getFullYear()}</strong><small>{new Date(dashboard.syncedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 同步</small></div>
+          <button className="profile-trigger" onClick={onAccount} aria-label="打开个人档案与账号设置"><span>{dashboard.user.displayName.slice(0, 2).toUpperCase()}</span><Settings size={18} /></button>
+        </div>
       </header>
       <section className="frequency">
         <div className="section-heading"><div><h2>训练频率</h2><p>每一个方格代表一天，颜色越亮表示当天记录越多</p></div><div className="period-tabs" aria-label="训练频率时间范围">{frequencyPeriods.map((item) => <button key={item.id} className={period === item.id ? "active" : ""} aria-pressed={period === item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div></div>
         <div className="heatmap-row"><div className="heatmap-panel"><Heatmap activity={dashboard.activity} period={period} syncedAt={dashboard.syncedAt} /><div className="heatmap-legend"><span>少</span><i data-level="0" /><i data-level="1" /><i data-level="2" /><i data-level="3" /><span>多</span></div></div><div className="frequency-stats"><div className="frequency-total"><strong>{selectedWorkouts}</strong><span>次训练</span><small>{periodConfig.label}范围</small></div><div className="frequency-meta"><span><b>{activeWeeks}</b>活跃周</span><span><b className="orange">{dashboard.summary.streak}</b>当前连续</span></div></div></div>
       </section>
-      <div className="history-columns">
+      <div className="profile-progress-columns">
         <section className="timeline"><div className="section-heading"><h2>近期训练</h2><span>真实记录</span></div>{dashboard.recentWorkouts.length ? dashboard.recentWorkouts.map((session, index) => { const date = new Date(session.started_at); return <div className={`session ${["lime", "orange", "blue"][index % 3]}`} key={session.id}><i /><time><strong>{String(date.getDate()).padStart(2, "0")}</strong><small>{date.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</small></time><div><h3>{session.plan_name}</h3><p>{session.set_count} 组 · {formatDuration(session.duration_seconds)}</p><b>{formatNumber(session.volume_kg)} kg</b></div></div>; }) : <div className="data-empty"><History size={26} /><strong>还没有训练记录</strong><p>完成第一组后，这里会形成你的训练时间线。</p></div>}<footer><span>累计 {dashboard.summary.totalWorkouts} 次训练</span><b>云端同步</b></footer></section>
         <section className="trend">
           <div className="section-heading"><h2>力量趋势</h2><button>{dashboard.trend.exerciseName || "等待记录"} <ChevronDown size={14} /></button></div>
@@ -352,16 +353,15 @@ function HistoryView({ dashboard }: { dashboard: DashboardData }) {
           <div className="chart-wrap">{trendData.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={trendData} margin={{ top: 12, right: 16, left: -20, bottom: 0 }}><CartesianGrid stroke="#29302c" vertical={false} /><XAxis dataKey="date" stroke="#66706b" tickLine={false} axisLine={false} fontSize={10} interval="preserveStartEnd" /><YAxis domain={["dataMin - 5", "dataMax + 5"]} stroke="#66706b" tickLine={false} axisLine={false} fontSize={10} /><Tooltip contentStyle={{ background: "#121613", border: "1px solid #303733", borderRadius: 4 }} /><Line type="monotone" dataKey="value" stroke="#c0fa4a" strokeWidth={3} dot={{ r: 3, fill: "#c0fa4a", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#ff9138" }} isAnimationActive={false} /></LineChart></ResponsiveContainer> : <div className="data-empty chart-empty"><Activity size={26} /><strong>等待力量轨迹</strong><p>记录同一动作的重量与次数后自动生成。</p></div>}</div>
           <p className="chart-note">基于每组重量与次数估算，减少体重和初始力量差异影响</p>
         </section>
-        <Leaderboard entries={dashboard.leaderboard} compact />
       </div>
     </section>
   );
 }
 
-function Leaderboard({ entries, compact = false }: { entries: LeaderboardEntry[]; compact?: boolean }) {
+function Leaderboard({ entries }: { entries: LeaderboardEntry[] }) {
   const tones = ["lime", "orange", "blue", "purple"];
   return (
-    <section className={`leaderboard ${compact ? "compact" : ""}`}>
+    <section className="leaderboard">
       <div className="section-heading"><div><h2>好友进步榜</h2><p>按相对力量进步率与训练稳定性综合排名</p></div><span>近 8 周</span></div>
       <div className="rank-list">{entries.length ? entries.map((friend, index) => <div className={`rank-row ${tones[index % tones.length]}`} key={`${friend.rank}-${friend.name}`}><b>{String(friend.rank).padStart(2, "0")}</b><div><strong>{friend.isCurrentUser ? `${friend.name}（我）` : friend.name}</strong><span>{friend.progressPercent === null ? "建立基线中" : `${friend.progressPercent >= 0 ? "+" : ""}${friend.progressPercent}%`}</span><div className="rank-track"><i style={{ width: `${Math.max(5, friend.score)}%` }} /></div><small>稳定性 {friend.stability} · 综合分 {friend.score}</small></div></div>) : <div className="data-empty"><Trophy size={26} /><strong>榜单等待第一条记录</strong><p>邀请朋友并开始训练后，这里会按个人进步公平排名。</p></div>}</div>
       <footer><span>RANKING METHOD</span><p>相对进步 70% · 稳定性 30%</p></footer>
@@ -373,17 +373,13 @@ function RankingView({ entries }: { entries: LeaderboardEntry[] }) {
   return <section className="ranking-view page-view"><header className="page-header"><div><span className="eyebrow">FRIENDS / RANKING</span><h1>公平地看见进步</h1><p>不比较起点，只比较每个人相对自己的成长。</p></div><Trophy className="header-icon" /></header><div className="ranking-layout"><Leaderboard entries={entries} /><aside className="ranking-method"><span className="eyebrow">HOW IT WORKS</span><h2>不直接按重量排名</h2><p>性别、体重、初始力量都会影响绝对重量。练迹使用前后两个 28 天窗口的个人力量变化和训练稳定性计算榜单。</p><dl><div><dt>70%</dt><dd>相对力量进步</dd></div><div><dt>30%</dt><dd>训练稳定性</dd></div></dl></aside></div></section>;
 }
 
-function ProfileView({ dashboard, onAccount }: { dashboard: DashboardData; onAccount: () => void }) {
-  const me = dashboard.leaderboard.find((entry) => entry.isCurrentUser);
-  const joinedDays = Math.max(1, Math.floor((dashboard.syncedAt - dashboard.user.createdAt) / (24 * 60 * 60 * 1000)) + 1);
-  return <section className="profile-view page-view"><header className="page-header"><div><span className="eyebrow">PROFILE / SETTINGS</span><h1>我的训练档案</h1><p>管理账号、同步状态和好友邀请码。</p></div><Settings className="header-icon" /></header><div className="profile-grid"><div className="profile-identity"><CircleUserRound size={72} /><div><span>@{dashboard.user.username}</span><h2>{dashboard.user.displayName}</h2><p>连续训练 {dashboard.summary.streak} 天 · 加入 {joinedDays} 天</p></div></div><div className="profile-stats"><div><strong>{dashboard.summary.totalWorkouts}</strong><span>累计训练</span></div><div><strong>{me?.stability ?? 0}</strong><span>稳定性评分</span></div><div><strong>{me?.progressPercent === null || me?.progressPercent === undefined ? "--" : `${me.progressPercent}%`}</strong><span>近 28 天进步</span></div></div><button className="secondary-action" onClick={onAccount}>账号与邀请码</button></div></section>;
-}
-
-function AccountDialog({ user, onClose, onAuthenticated, onLoggedOut }: { user: AuthUser | null; onClose: () => void; onAuthenticated: (user: AuthUser) => void; onLoggedOut: () => void }) {
+function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut }: { user: AuthUser | null; dashboard: DashboardData | null; onClose: () => void; onAuthenticated: (user: AuthUser) => void; onLoggedOut: () => void }) {
   const [registering, setRegistering] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const me = dashboard?.leaderboard.find((entry) => entry.isCurrentUser);
+  const joinedDays = user ? Math.max(1, Math.floor(((dashboard?.syncedAt ?? user.createdAt) - user.createdAt) / (24 * 60 * 60 * 1000)) + 1) : 0;
 
   async function submitAccount(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -433,14 +429,14 @@ function AccountDialog({ user, onClose, onAuthenticated, onLoggedOut }: { user: 
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => user && event.target === event.currentTarget && onClose()}>
-      <div className="account-dialog" role="dialog" aria-modal="true" aria-label={user ? "账号与邀请码" : registering ? "注册练迹账号" : "登录练迹"}>
+    <div className={`modal-backdrop ${user ? "profile-backdrop" : ""}`} role="presentation" onMouseDown={(event) => user && event.target === event.currentTarget && onClose()}>
+      <div className={`account-dialog ${user ? "profile-drawer" : ""}`} role="dialog" aria-modal="true" aria-label={user ? "个人档案与账号设置" : registering ? "注册练迹账号" : "登录练迹"}>
         {user && <button className="dialog-close" onClick={onClose} aria-label="关闭"><X /></button>}
-        <Brand />
+        {!user && <Brand />}
         {user ? <div className="account-panel">
-          <span className="eyebrow">SYNCED ACCOUNT</span>
-          <h2>{user.displayName}</h2>
-          <p>@{user.username} · 训练数据已使用云端账号同步</p>
+          <div className="profile-drawer-header"><CircleUserRound size={58} /><div><span>PERSONAL PROFILE</span><h2>{user.displayName}</h2><p>@{user.username} · 加入练迹 {joinedDays} 天</p></div></div>
+          <div className="profile-drawer-stats"><div><strong>{dashboard?.summary.totalWorkouts ?? "--"}</strong><span>累计训练</span></div><div><strong>{dashboard?.summary.streak ?? "--"}</strong><span>当前连续</span></div><div><strong>{me?.stability ?? "--"}</strong><span>稳定性</span></div></div>
+          <div className="profile-sync-line"><i /><span>训练数据已通过账号同步</span><b>{dashboard ? "已同步" : "同步中"}</b></div>
           <div className="invite-generator">
             <span>好友邀请码</span>
             {inviteCode ? <><strong>{inviteCode}</strong><small>7 天内可使用 1 次，原始码仅在这里显示。</small><button className="secondary-action" onClick={() => navigator.clipboard?.writeText(inviteCode)}>复制邀请码</button></> : <button className="primary-action" onClick={createInvite} disabled={submitting}>{submitting ? "正在创建…" : "生成一次性邀请码"}</button>}
@@ -619,7 +615,6 @@ export default function Home() {
     : view === "today" ? <TodayView dashboard={dashboard} activeWorkout={activeWorkout} onStart={startWorkout} onResume={() => setView("workout")} onPlan={() => setView("plan")} starting={saving} error={workoutError} />
     : view === "plan" ? <TrainingPlanView key={dashboard.plan.version} plan={dashboard.plan} onSave={savePlan} saving={saving} error={workoutError} />
     : view === "workout" && activeWorkout && currentWorkoutExercise ? <ActiveWorkoutView key={currentWorkoutExercise.id} workout={activeWorkout} exercise={currentWorkoutExercise} onBack={() => setView("today")} onSaveSet={saveSet} onSkip={() => finishExercise(currentWorkoutExercise.id, true)} saving={saving} error={workoutError} />
-    : view === "history" ? <HistoryView dashboard={dashboard} />
     : view === "ranking" ? <RankingView entries={dashboard.leaderboard} />
     : <ProfileView dashboard={dashboard} onAccount={() => setAccountOpen(true)} />;
 
@@ -629,7 +624,7 @@ export default function Home() {
       <div className="app-content">{content}</div>
       {view !== "workout" && user && <MobileNav view={view} setView={setView} />}
       {resting && <WorkoutRestOverlay exercise={resting.exercise} completedSet={resting.completedSet} onContinue={() => setResting(null)} onFinish={() => finishExercise(resting.exercise.id)} />}
-      {(accountOpen || !user) && !checkingSession && <AccountDialog user={user} onClose={() => setAccountOpen(false)} onAuthenticated={(authenticatedUser) => { setUser(authenticatedUser); setAccountOpen(false); setDashboard(null); void loadDashboard(); }} onLoggedOut={() => { setUser(null); setDashboard(null); setAccountOpen(true); setView("today"); }} />}
+      {(accountOpen || !user) && !checkingSession && <AccountDialog user={user} dashboard={dashboard} onClose={() => setAccountOpen(false)} onAuthenticated={(authenticatedUser) => { setUser(authenticatedUser); setAccountOpen(false); setDashboard(null); void loadDashboard(); }} onLoggedOut={() => { setUser(null); setDashboard(null); setAccountOpen(true); setView("today"); }} />}
       {notice && <div className="sync-toast" role="status"><Check size={18} />{notice}</div>}
     </main>
   );

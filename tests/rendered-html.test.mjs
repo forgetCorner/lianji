@@ -6,8 +6,9 @@ const root = new URL("../", import.meta.url);
 
 test("生产构建包含练迹页面与真实数据 API", async () => {
   await access(new URL("dist/server/index.js", root));
-  const [page, hosting] = await Promise.all([
+  const [page, styles, hosting] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
     readFile(new URL(".openai/hosting.json", root), "utf8"),
   ]);
 
@@ -22,6 +23,13 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(page, /const chineseMonths = \["一月".+"十二月"\]/);
   assert.match(page, /period === "year" \? startOfCalendarYear/);
   assert.match(page, /12 月 31 日/);
+  assert.match(page, /data-testid="profile-view"/);
+  assert.match(page, /个人档案与账号设置/);
+  assert.doesNotMatch(page, /HistoryView/);
+  assert.doesNotMatch(page, /view === "history"/);
+  assert.equal(page.match(/<Leaderboard /g)?.length, 1);
+  assert.match(styles, /grid-template-columns: repeat\(4, 1fr\)/);
+  assert.match(styles, /profile-drawer/);
   assert.equal(JSON.parse(hosting).d1, "DB");
 });
 
