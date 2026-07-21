@@ -98,6 +98,8 @@ const frequencyPeriods: { id: FrequencyPeriod; label: string; weeks: number }[] 
   { id: "4w", label: "4 周", weeks: 4 },
 ];
 
+const chineseMonths = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"];
+
 function toDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -109,6 +111,16 @@ function startOfFrequencyRange(timestamp: number, weeks: number): Date {
   const start = new Date(end);
   start.setDate(start.getDate() - mondayOffset - (weeks - 1) * 7);
   return start;
+}
+
+function startOfCalendarYear(timestamp: number): Date {
+  const date = new Date(timestamp);
+  return new Date(date.getFullYear(), 0, 1);
+}
+
+function endOfCalendarYear(timestamp: number): Date {
+  const date = new Date(timestamp);
+  return new Date(date.getFullYear(), 11, 31);
 }
 
 function formatShortDate(date: Date): string {
@@ -255,39 +267,54 @@ function TodayView({ dashboard, activeWorkout, onStart, onResume, onPlan, starti
 
 function Heatmap({ activity, period, syncedAt }: { activity: DashboardData["activity"]; period: FrequencyPeriod; syncedAt: number }) {
   const config = frequencyPeriods.find((item) => item.id === period) ?? frequencyPeriods[0];
-  const { cells, monthLabels, rangeLabel } = useMemo(() => {
+  const { cells, monthLabels, rangeLabel, columnCount } = useMemo(() => {
     const counts = new Map(activity.map((entry) => [entry.date, entry.count]));
-    const start = startOfFrequencyRange(syncedAt, config.weeks);
     const today = new Date(syncedAt);
     today.setHours(23, 59, 59, 999);
+
+    if (period === "year") {
+      const start = startOfCalendarYear(syncedAt);
+      const end = endOfCalendarYear(syncedAt);
+      const leadingDays = (start.getDay() || 7) - 1;
+      const nextCells = Array.from({ length: leadingDays }, (_, index) => ({ key: `leading-${index}`, date: "", count: 0, level: 0, future: false, empty: true }));
+      for (const date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
+        const key = toDateKey(date);
+        const count = counts.get(key) ?? 0;
+        nextCells.push({ key, date: key, count, level: Math.min(3, count), future: date > today, empty: false });
+      }
+      const labels = chineseMonths.map((label, month) => {
+        const monthStart = new Date(start.getFullYear(), month, 1);
+        const elapsedDays = Math.round((Date.UTC(monthStart.getFullYear(), monthStart.getMonth(), monthStart.getDate()) - Date.UTC(start.getFullYear(), 0, 1)) / 86_400_000);
+        return { label, column: Math.floor((leadingDays + elapsedDays) / 7) + 1 };
+      });
+      return {
+        cells: nextCells,
+        monthLabels: labels,
+        rangeLabel: `${start.getFullYear()} 年 1 月 1 日 — 12 月 31 日`,
+        columnCount: Math.ceil(nextCells.length / 7),
+      };
+    }
+
+    const start = startOfFrequencyRange(syncedAt, config.weeks);
     const nextCells = Array.from({ length: config.weeks * 7 }, (_, index) => {
       const date = new Date(start);
       date.setDate(start.getDate() + index);
       const key = toDateKey(date);
       const count = counts.get(key) ?? 0;
-      return { date: key, count, level: Math.min(3, count), future: date > today };
+      return { key, date: key, count, level: Math.min(3, count), future: date > today, empty: false };
     });
-    const labels: { label: string; column: number }[] = [];
-    let previousMonth = -1;
-    for (let week = 0; week < config.weeks; week += 1) {
-      const date = new Date(start);
-      date.setDate(start.getDate() + week * 7);
-      if (date.getMonth() !== previousMonth) {
-        labels.push({ label: date.toLocaleDateString("en-US", { month: "short" }).toUpperCase(), column: week + 1 });
-        previousMonth = date.getMonth();
-      }
-    }
     return {
       cells: nextCells,
-      monthLabels: labels,
+      monthLabels: [],
       rangeLabel: `${formatShortDate(start)} — ${formatShortDate(new Date(syncedAt))}`,
+      columnCount: config.weeks,
     };
-  }, [activity, config.weeks, syncedAt]);
-  const gridStyle = { "--heatmap-columns": config.weeks } as React.CSSProperties;
+  }, [activity, config.weeks, period, syncedAt]);
+  const gridStyle = { "--heatmap-columns": columnCount } as React.CSSProperties;
   return (
     <div className="heatmap-visual" data-period={period} style={gridStyle}>
       {period === "year" ? <div className="heatmap-axis" aria-hidden="true">{monthLabels.map((item) => <span key={`${item.label}-${item.column}`} style={{ gridColumn: item.column }}>{item.label}</span>)}</div> : <div className="heatmap-range-axis"><span>{rangeLabel}</span><b>{config.label}</b></div>}
-      <div className="heatmap" aria-label={`${config.label}训练频率，${rangeLabel}`}>{cells.map((cell) => <i key={cell.date} data-level={cell.level} data-future={cell.future || undefined} title={`${cell.date} · ${cell.count} 次训练`} />)}</div>
+      <div className="heatmap" aria-label={`${config.label}训练频率，${rangeLabel}`}>{cells.map((cell) => <i key={cell.key} data-empty={cell.empty || undefined} data-level={cell.level} data-future={cell.future || undefined} title={cell.empty ? undefined : `${cell.date} · ${cell.count} 次训练`} />)}</div>
     </div>
   );
 }
@@ -295,7 +322,7 @@ function Heatmap({ activity, period, syncedAt }: { activity: DashboardData["acti
 function HistoryView({ dashboard }: { dashboard: DashboardData }) {
   const [period, setPeriod] = useState<FrequencyPeriod>("year");
   const periodConfig = frequencyPeriods.find((item) => item.id === period) ?? frequencyPeriods[0];
-  const periodStart = startOfFrequencyRange(dashboard.syncedAt, periodConfig.weeks);
+  const periodStart = period === "year" ? startOfCalendarYear(dashboard.syncedAt) : startOfFrequencyRange(dashboard.syncedAt, periodConfig.weeks);
   const periodStartKey = toDateKey(periodStart);
   const periodEndKey = toDateKey(new Date(dashboard.syncedAt));
   const selectedActivity = dashboard.activity.filter((entry) => entry.date >= periodStartKey && entry.date <= periodEndKey);

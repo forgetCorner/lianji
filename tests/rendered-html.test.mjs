@@ -19,6 +19,9 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(page, /\/api\/workouts\/active/);
   assert.match(page, /aria-label="训练频率时间范围"/);
   assert.match(page, /selectedActivity\.reduce/);
+  assert.match(page, /const chineseMonths = \["一月".+"十二月"\]/);
+  assert.match(page, /period === "year" \? startOfCalendarYear/);
+  assert.match(page, /12 月 31 日/);
   assert.equal(JSON.parse(hosting).d1, "DB");
 });
 
