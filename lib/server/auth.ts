@@ -3,7 +3,8 @@ import { ensureDatabase, getD1 } from "@/db";
 
 const sessionCookie = "lianji_session";
 const sessionDurationMs = 30 * 24 * 60 * 60 * 1000;
-const passwordIterations = 210_000;
+// Cloudflare Workers WebCrypto currently caps PBKDF2 at 100,000 iterations.
+const passwordIterations = 100_000;
 
 export type AuthUser = {
   id: string;

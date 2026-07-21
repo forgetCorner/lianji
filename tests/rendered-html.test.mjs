@@ -43,5 +43,6 @@ test("数据库迁移不保存密码、会话或邀请码原文", async () => {
   assert.match(migration, /code_hash/);
   assert.doesNotMatch(migration, /\bpassword\b/);
   assert.match(auth, /PBKDF2/);
+  assert.match(auth, /passwordIterations = 100_000/);
   assert.match(auth, /HttpOnly; SameSite=Lax/);
 });

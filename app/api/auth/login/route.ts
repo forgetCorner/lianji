@@ -12,7 +12,7 @@ type LoginRow = {
   created_at: number;
 };
 
-const fakePasswordHash = "pbkdf2_sha256$210000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const fakePasswordHash = "pbkdf2_sha256$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 export async function POST(request: Request): Promise<Response> {
   const invalidRequest = validateMutationRequest(request);
