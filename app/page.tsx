@@ -32,6 +32,7 @@ import {
 } from "recharts";
 
 type View = "today" | "history" | "ranking" | "profile" | "workout";
+type FrequencyPeriod = "year" | "12w" | "4w";
 
 type AuthUser = { id: string; username: string; displayName: string; createdAt: number };
 type PlanExercise = { id: string; name: string; muscleGroup: string; target: string };
@@ -88,6 +89,29 @@ function formatDuration(seconds: number): string {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 }).format(value);
+}
+
+const frequencyPeriods: { id: FrequencyPeriod; label: string; weeks: number }[] = [
+  { id: "year", label: "年度", weeks: 52 },
+  { id: "12w", label: "12 周", weeks: 12 },
+  { id: "4w", label: "4 周", weeks: 4 },
+];
+
+function toDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function startOfFrequencyRange(timestamp: number, weeks: number): Date {
+  const end = new Date(timestamp);
+  end.setHours(0, 0, 0, 0);
+  const mondayOffset = (end.getDay() || 7) - 1;
+  const start = new Date(end);
+  start.setDate(start.getDate() - mondayOffset - (weeks - 1) * 7);
+  return start;
+}
+
+function formatShortDate(date: Date): string {
+  return `${date.getMonth() + 1}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function Brand() {
@@ -293,24 +317,56 @@ function RestOverlay({ onContinue, completedSet }: { onContinue: () => void; com
   );
 }
 
-function Heatmap({ activity }: { activity: DashboardData["activity"] }) {
-  const cells = useMemo(() => {
+function Heatmap({ activity, period, syncedAt }: { activity: DashboardData["activity"]; period: FrequencyPeriod; syncedAt: number }) {
+  const config = frequencyPeriods.find((item) => item.id === period) ?? frequencyPeriods[0];
+  const { cells, monthLabels, rangeLabel } = useMemo(() => {
     const counts = new Map(activity.map((entry) => [entry.date, entry.count]));
-    return Array.from({ length: 364 }, (_, index) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (363 - index));
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-      return Math.min(3, counts.get(key) ?? 0);
+    const start = startOfFrequencyRange(syncedAt, config.weeks);
+    const today = new Date(syncedAt);
+    today.setHours(23, 59, 59, 999);
+    const nextCells = Array.from({ length: config.weeks * 7 }, (_, index) => {
+      const date = new Date(start);
+      date.setDate(start.getDate() + index);
+      const key = toDateKey(date);
+      const count = counts.get(key) ?? 0;
+      return { date: key, count, level: Math.min(3, count), future: date > today };
     });
-  }, [activity]);
-  return <div className="heatmap" aria-label="2026 年训练热力图">{cells.map((level, index) => <i key={index} data-level={level} />)}</div>;
+    const labels: { label: string; column: number }[] = [];
+    let previousMonth = -1;
+    for (let week = 0; week < config.weeks; week += 1) {
+      const date = new Date(start);
+      date.setDate(start.getDate() + week * 7);
+      if (date.getMonth() !== previousMonth) {
+        labels.push({ label: date.toLocaleDateString("en-US", { month: "short" }).toUpperCase(), column: week + 1 });
+        previousMonth = date.getMonth();
+      }
+    }
+    return {
+      cells: nextCells,
+      monthLabels: labels,
+      rangeLabel: `${formatShortDate(start)} — ${formatShortDate(new Date(syncedAt))}`,
+    };
+  }, [activity, config.weeks, syncedAt]);
+  const gridStyle = { "--heatmap-columns": config.weeks } as React.CSSProperties;
+  return (
+    <div className="heatmap-visual" data-period={period} style={gridStyle}>
+      {period === "year" ? <div className="heatmap-axis" aria-hidden="true">{monthLabels.map((item) => <span key={`${item.label}-${item.column}`} style={{ gridColumn: item.column }}>{item.label}</span>)}</div> : <div className="heatmap-range-axis"><span>{rangeLabel}</span><b>{config.label}</b></div>}
+      <div className="heatmap" aria-label={`${config.label}训练频率，${rangeLabel}`}>{cells.map((cell) => <i key={cell.date} data-level={cell.level} data-future={cell.future || undefined} title={`${cell.date} · ${cell.count} 次训练`} />)}</div>
+    </div>
+  );
 }
 
 function HistoryView({ dashboard }: { dashboard: DashboardData }) {
-  const [period, setPeriod] = useState("年度");
+  const [period, setPeriod] = useState<FrequencyPeriod>("year");
+  const periodConfig = frequencyPeriods.find((item) => item.id === period) ?? frequencyPeriods[0];
+  const periodStart = startOfFrequencyRange(dashboard.syncedAt, periodConfig.weeks);
+  const periodStartKey = toDateKey(periodStart);
+  const periodEndKey = toDateKey(new Date(dashboard.syncedAt));
+  const selectedActivity = dashboard.activity.filter((entry) => entry.date >= periodStartKey && entry.date <= periodEndKey);
+  const selectedWorkouts = selectedActivity.reduce((sum, entry) => sum + entry.count, 0);
   const trendData = dashboard.trend.points.map((point) => ({ date: point.date.slice(5).replace("-", "."), value: point.value }));
   const currentStrength = trendData.at(-1)?.value ?? 0;
-  const activeWeeks = new Set(dashboard.activity.map((entry) => {
+  const activeWeeks = new Set(selectedActivity.map((entry) => {
     const date = new Date(`${entry.date}T00:00:00`);
     date.setDate(date.getDate() - ((date.getDay() || 7) - 1));
     return date.toISOString().slice(0, 10);
@@ -322,8 +378,8 @@ function HistoryView({ dashboard }: { dashboard: DashboardData }) {
         <div className="year"><CalendarDays size={20} /><strong>{new Date().getFullYear()}</strong><small>{new Date(dashboard.syncedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 同步</small></div>
       </header>
       <section className="frequency">
-        <div className="section-heading"><div><h2>训练频率</h2><p>每一个方格代表一天</p></div><div className="period-tabs">{["年度", "12 周", "4 周"].map((item) => <button key={item} className={period === item ? "active" : ""} onClick={() => setPeriod(item)}>{item}</button>)}</div></div>
-        <div className="heatmap-row"><div><div className="months">{["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"].map((m) => <span key={m}>{m}</span>)}</div><Heatmap activity={dashboard.activity} /></div><div className="frequency-stats"><div><strong>{dashboard.summary.totalWorkouts}</strong><span>次训练</span></div><div><b>{activeWeeks}</b><span>活跃周</span><b className="orange">{dashboard.summary.streak}</b><span>当前连续</span></div></div></div>
+        <div className="section-heading"><div><h2>训练频率</h2><p>每一个方格代表一天，颜色越亮表示当天记录越多</p></div><div className="period-tabs" aria-label="训练频率时间范围">{frequencyPeriods.map((item) => <button key={item.id} className={period === item.id ? "active" : ""} aria-pressed={period === item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div></div>
+        <div className="heatmap-row"><div className="heatmap-panel"><Heatmap activity={dashboard.activity} period={period} syncedAt={dashboard.syncedAt} /><div className="heatmap-legend"><span>少</span><i data-level="0" /><i data-level="1" /><i data-level="2" /><i data-level="3" /><span>多</span></div></div><div className="frequency-stats"><div className="frequency-total"><strong>{selectedWorkouts}</strong><span>次训练</span><small>{periodConfig.label}范围</small></div><div className="frequency-meta"><span><b>{activeWeeks}</b>活跃周</span><span><b className="orange">{dashboard.summary.streak}</b>当前连续</span></div></div></div>
       </section>
       <div className="history-columns">
         <section className="timeline"><div className="section-heading"><h2>近期训练</h2><span>真实记录</span></div>{dashboard.recentWorkouts.length ? dashboard.recentWorkouts.map((session, index) => { const date = new Date(session.started_at); return <div className={`session ${["lime", "orange", "blue"][index % 3]}`} key={session.id}><i /><time><strong>{String(date.getDate()).padStart(2, "0")}</strong><small>{date.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</small></time><div><h3>{session.plan_name}</h3><p>{session.set_count} 组 · {formatDuration(session.duration_seconds)}</p><b>{formatNumber(session.volume_kg)} kg</b></div></div>; }) : <div className="data-empty"><History size={26} /><strong>还没有训练记录</strong><p>完成第一组后，这里会形成你的训练时间线。</p></div>}<footer><span>累计 {dashboard.summary.totalWorkouts} 次训练</span><b>云端同步</b></footer></section>

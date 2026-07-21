@@ -14,6 +14,8 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(page, /apiRequest<DashboardData>\("\/api\/dashboard"\)/);
   assert.match(page, /\/api\/auth\/register/);
   assert.match(page, /\/api\/workouts\/\$\{activeWorkout\.id\}\/sets/);
+  assert.match(page, /aria-label="训练频率时间范围"/);
+  assert.match(page, /selectedActivity\.reduce/);
   assert.equal(JSON.parse(hosting).d1, "DB");
 });
 
