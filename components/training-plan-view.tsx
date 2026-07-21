@@ -1,9 +1,11 @@
 "use client";
 
-import { ArrowDown, ArrowUp, CalendarRange, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
 import { exerciseLibrary, targetLabel, weekdays } from "@/lib/training";
 import type { ExerciseDefinition, PlanExercise, TrackingType, TrainingDay, TrainingPlan, WeightMode } from "@/lib/training";
+import { KineticIcon } from "@/components/kinetic-icons";
 
 type Props = {
   plan: TrainingPlan;
@@ -85,11 +87,12 @@ export function TrainingPlanView({ plan, saving, error, onSave }: Props) {
     <section className="plan-view page-view" data-testid="plan-view">
       <header className="page-header plan-page-header">
         <div><span className="eyebrow">WEEKLY PROGRAM</span><h1>安排你的一周</h1><p>训练日、动作顺序和目标都由你决定，修改只影响之后的训练。</p></div>
-        <CalendarRange className="header-icon" />
+        <KineticIcon kind="plan" active size={52} className="header-icon" />
       </header>
 
       <div className="plan-workspace">
         <aside className="week-rail" aria-label="每周训练日">
+          <div className="kinetic-week-track" aria-hidden="true"><i /></div>
           <div className="week-rail-title"><span>每周训练</span><strong>{draft.days.filter((day) => day.enabled).length} 天</strong></div>
           {weekdays.map((weekday) => {
             const day = draft.days.find((item) => item.weekday === weekday.value)!;
@@ -97,17 +100,17 @@ export function TrainingPlanView({ plan, saving, error, onSave }: Props) {
           })}
         </aside>
 
-        <div className="day-editor">
+        <motion.div className="day-editor" key={selectedWeekday} initial={{ opacity: 0, x: 14 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.34, ease: [0.16, 1, 0.3, 1] }}>
           <div className="day-editor-header">
             <div><span>{weekdays.find((item) => item.value === selectedDay.weekday)?.label}</span><input aria-label="训练日名称" value={selectedDay.name} onChange={(event) => updateDay((day) => ({ ...day, name: event.target.value }))} /><input className="focus-input" aria-label="训练重点" value={selectedDay.focus} placeholder="例如：腿 + 胸 + 背" onChange={(event) => updateDay((day) => ({ ...day, focus: event.target.value }))} /></div>
             <label className="day-toggle"><input type="checkbox" checked={selectedDay.enabled} onChange={(event) => updateDay((day) => ({ ...day, enabled: event.target.checked }))} /><span>{selectedDay.enabled ? "训练日" : "休息日"}</span></label>
           </div>
 
           <div className="plan-exercise-list">
-            {selectedDay.exercises.length ? selectedDay.exercises.map((exercise, index) => {
+            <AnimatePresence initial={false}>{selectedDay.exercises.length ? selectedDay.exercises.map((exercise, index) => {
               const isDuration = exercise.trackingType === "duration" || exercise.trackingType === "bodyweight_duration";
               return (
-                <article className="plan-exercise-editor" key={exercise.id}>
+                <motion.article className="plan-exercise-editor" layout key={exercise.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -18 }} transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}>
                   <div className="exercise-editor-index"><b>{String(index + 1).padStart(2, "0")}</b><span>{targetLabel(exercise)}</span></div>
                   <div className="exercise-editor-body">
                     <div className="exercise-name-row">
@@ -130,15 +133,15 @@ export function TrainingPlanView({ plan, saving, error, onSave }: Props) {
                     <input className="exercise-note-input" aria-label="动作提示" value={exercise.notes} placeholder="动作提示或注意事项" onChange={(event) => updateExercise(exercise.id, { notes: event.target.value })} />
                   </div>
                   <div className="exercise-editor-actions"><button aria-label="上移" disabled={index === 0} onClick={() => moveExercise(index, -1)}><ArrowUp size={16} /></button><button aria-label="下移" disabled={index === selectedDay.exercises.length - 1} onClick={() => moveExercise(index, 1)}><ArrowDown size={16} /></button><button aria-label="删除动作" onClick={() => updateDay((day) => ({ ...day, exercises: day.exercises.filter((item) => item.id !== exercise.id) }))}><Trash2 size={16} /></button></div>
-                </article>
+                </motion.article>
               );
-            }) : <div className="plan-empty"><CalendarRange size={30} /><strong>这一天还没有动作</strong><p>开启训练日后，从动作库添加第一项。</p></div>}
+            }) : <motion.div className="plan-empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><KineticIcon kind="plan" size={34} /><strong>这一天还没有动作</strong><p>开启训练日后，从动作库添加第一项。</p></motion.div>}</AnimatePresence>
           </div>
 
           <div className="add-exercise-bar"><select aria-label="选择要添加的动作" value={librarySelection} onChange={(event) => setLibrarySelection(event.target.value)}>{exerciseLibrary.map((exercise) => <option key={exercise.exerciseId} value={exercise.exerciseId}>{exercise.name} · {exercise.equipment}</option>)}</select><button className="secondary-action" onClick={addExercise}><Plus size={17} />添加动作</button><button className="text-action" onClick={addCustomExercise}>新建自定义动作</button></div>
           {error && <p className="inline-error" role="alert">{error}</p>}
-          <div className="plan-save-bar"><span>{hasEmptyTrainingDay ? "训练日至少需要一个动作" : dirty ? "有尚未同步的修改" : `已同步 · 版本 ${draft.version}`}</span><button className="primary-action" disabled={!dirty || saving || hasEmptyTrainingDay} onClick={save}><Save size={18} />{saving ? "正在保存…" : "保存周计划"}</button></div>
-        </div>
+          <div className="plan-save-bar"><span>{hasEmptyTrainingDay ? "训练日至少需要一个动作" : dirty ? "有尚未同步的修改" : `已同步 · 版本 ${draft.version}`}</span><button className="primary-action" disabled={!dirty || saving || hasEmptyTrainingDay} onClick={save}><KineticIcon kind="save" active={dirty} size={19} />{saving ? "正在保存…" : "保存周计划"}</button></div>
+        </motion.div>
       </div>
     </section>
   );

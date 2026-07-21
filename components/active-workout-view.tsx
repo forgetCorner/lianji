@@ -1,8 +1,11 @@
 "use client";
 
-import { Activity, ArrowLeft, Check, Dumbbell, Minus, Plus, SkipForward } from "lucide-react";
+import { ArrowLeft, Check, Minus, Plus, SkipForward } from "lucide-react";
+import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import type { ActiveWorkout, WorkoutExercise } from "@/lib/training";
+import { KineticIcon } from "@/components/kinetic-icons";
+import { TrackMark } from "@/components/track-visuals";
 
 export type SetInput = {
   workoutExerciseId: string;
@@ -77,7 +80,7 @@ export function ActiveWorkoutView({ workout, exercise, saving, error, onBack, on
           <p>{exercise.equipment || "徒手"} · {exercise.minSets === exercise.maxSets ? `${exercise.maxSets} 组` : `${exercise.minSets}–${exercise.maxSets} 组`}</p>
           <div className="focus-line"><i /><span>{exercise.muscleGroup || "全身"}</span></div>
         </div>
-        <Dumbbell className="workout-watermark" strokeWidth={1.25} />
+        <TrackMark className="workout-watermark" state="syncing" />
       </div>
 
       <div className={`metrics ${exercise.weightMode === "per_side" ? "three-metrics" : ""}`}>
@@ -89,13 +92,13 @@ export function ActiveWorkoutView({ workout, exercise, saving, error, onBack, on
 
       <section className="sets-progress">
         <span className="eyebrow">SETS · 最少 {exercise.minSets} 组</span>
-        <div className="set-track">{Array.from({ length: exercise.maxSets }, (_, index) => index + 1).map((set) => <span key={set} className={set < currentSet ? "done" : set === currentSet ? "current" : ""}><i />{set}</span>)}</div>
+        <div className="set-track">{Array.from({ length: exercise.maxSets }, (_, index) => index + 1).map((set) => <motion.span layout key={set} className={set < currentSet ? "done" : set === currentSet ? "current" : ""}><motion.i animate={set < currentSet ? { scaleY: [1, 1.7, 1] } : undefined} />{set}</motion.span>)}</div>
       </section>
 
       <div className="technique"><span>TRAINING NOTE</span><strong>{exercise.notes || "动作质量优先，保持稳定节奏"}</strong><small>{isDuration ? `目标 ${Math.round(exercise.minDurationSeconds / 60)}–${Math.round(exercise.maxDurationSeconds / 60)} 分钟` : `目标 ${exercise.minReps}–${exercise.maxReps} 次 · 休息 ${exercise.restSeconds} 秒`}</small></div>
       <div className="previous-set"><span>当前记录</span><strong>{isDuration ? `${durationInMinutes ? Math.round(durationSeconds / 60) : durationSeconds} ${durationInMinutes ? "分钟" : "秒"}` : exercise.weightMode === "per_side" ? `左 ${leftWeight} + 右 ${rightWeight} kg × ${reps}` : isWeighted ? `${weight} kg × ${reps}` : `${reps} 次`}</strong><b>实时保存</b><small>第 {currentSet} 组 / 最多 {exercise.maxSets} 组</small><em>{elapsedLabel}</em></div>
       {error && <p className="inline-error" role="alert">{error}</p>}
-      <button className="primary-action complete-action" data-testid="complete-set" onClick={completeSet} disabled={saving}><Check size={22} />{saving ? "正在保存…" : "完成本组"}</button>
+      <motion.button whileTap={{ scale: 0.975 }} className="primary-action complete-action" data-testid="complete-set" onClick={completeSet} disabled={saving}><KineticIcon kind="save" active size={22} />{saving ? "正在保存…" : "完成本组"}</motion.button>
     </section>
   );
 }
@@ -111,7 +114,7 @@ export function WorkoutRestOverlay({ exercise, completedSet, onContinue, onFinis
   return (
     <div className="rest-overlay" role="dialog" aria-modal="true" aria-label="休息计时" data-testid="rest-overlay">
       <div className="rest-top"><span>SET {String(completedSet).padStart(2, "0")} COMPLETE · 已同步</span><small>{canFinish ? "已达到最低组数，可以结束动作" : "恢复呼吸，准备下一组"}</small></div>
-      <div className="timer-ring"><strong>{time}</strong><span>REST / {exercise.restSeconds} SEC</span><Activity size={22} /></div>
+      <div className="timer-ring"><div className="rest-energy-orbit" aria-hidden="true"><i /><i /></div><strong>{time}</strong><span>REST / {exercise.restSeconds} SEC</span><KineticIcon kind="recovery" active size={24} /></div>
       <div className="next-set"><span>NEXT</span><h2>{exercise.name} · 第 {completedSet + 1} 组</h2><strong>{canFinish ? "加做一组，或者进入下个动作" : "保持刚才的动作质量"}</strong><p>计划范围 {exercise.minSets}–{exercise.maxSets} 组</p><div className="next-progress">{Array.from({ length: exercise.maxSets }, (_, index) => <i key={index} className={index < completedSet ? "done" : ""} />)}</div></div>
       <button className="primary-action" data-testid="continue-workout" onClick={onContinue}><Check size={21} />{seconds ? "提前开始下一组" : "开始下一组"}</button>
       {canFinish && <button className="text-action finish-exercise-action" onClick={onFinish}><SkipForward size={15} />完成动作，进入下一项</button>}

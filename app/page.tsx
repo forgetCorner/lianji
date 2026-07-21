@@ -3,12 +3,9 @@
 import {
   Activity,
   CalendarDays,
-  CalendarRange,
   Check,
   ChevronDown,
   CircleUserRound,
-  Dumbbell,
-  Flame,
   History,
   Play,
   Settings,
@@ -16,7 +13,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -31,6 +28,13 @@ import type { ActiveWorkout, PlanExercise, TrainingDay, TrainingPlan, WorkoutExe
 import { TrainingPlanView } from "@/components/training-plan-view";
 import { ActiveWorkoutView, WorkoutRestOverlay } from "@/components/active-workout-view";
 import type { SetInput } from "@/components/active-workout-view";
+import { AppBootSequence } from "@/components/app-boot-sequence";
+import type { BootPhase } from "@/components/app-boot-sequence";
+import { TrackMark, TrainingStatusMark, WeekStatusIcon } from "@/components/track-visuals";
+import { KineticField } from "@/components/kinetic-field";
+import type { KineticIntensity, KineticMode } from "@/lib/visual/kinetic-scene";
+import { KineticIcon } from "@/components/kinetic-icons";
+import { KineticPageTransition } from "@/components/kinetic-page-transition";
 
 type View = "today" | "plan" | "ranking" | "profile" | "workout";
 type FrequencyPeriod = "year" | "12w" | "4w";
@@ -130,16 +134,16 @@ function formatShortDate(date: Date): string {
 function Brand() {
   return (
     <div className="brand" aria-label="练迹">
-      <span>练</span>
+      <TrackMark className="brand-symbol" state="active" />
       <small>TRACK</small>
     </div>
   );
 }
 
-function NavButton({ active, label, onClick, icon }: { active: boolean; label: string; onClick: () => void; icon: React.ReactNode }) {
+function NavButton({ active, label, onClick, icon }: { active: boolean; label: string; onClick: () => void; icon: "today" | "plan" | "ranking" | "profile" }) {
   return (
     <button className={`nav-button ${active ? "is-active" : ""}`} onClick={onClick} aria-current={active ? "page" : undefined}>
-      {icon}
+      <KineticIcon kind={icon} active={active} size={24} />
       <span>{label}</span>
     </button>
   );
@@ -150,10 +154,10 @@ function Sidebar({ view, setView, onAccount, user }: { view: View; setView: (vie
     <aside className="sidebar">
       <Brand />
       <nav className="side-nav" aria-label="主导航">
-        <NavButton active={view === "today" || view === "workout"} label="今日" onClick={() => setView("today")} icon={<Dumbbell size={23} />} />
-        <NavButton active={view === "plan"} label="计划" onClick={() => setView("plan")} icon={<CalendarRange size={23} />} />
-        <NavButton active={view === "ranking"} label="排行" onClick={() => setView("ranking")} icon={<Trophy size={23} />} />
-        <NavButton active={view === "profile"} label="我的" onClick={() => setView("profile")} icon={<UserRound size={23} />} />
+        <NavButton active={view === "today" || view === "workout"} label="今日" onClick={() => setView("today")} icon="today" />
+        <NavButton active={view === "plan"} label="计划" onClick={() => setView("plan")} icon="plan" />
+        <NavButton active={view === "ranking"} label="排行" onClick={() => setView("ranking")} icon="ranking" />
+        <NavButton active={view === "profile"} label="我的" onClick={() => setView("profile")} icon="profile" />
       </nav>
       <button className="account-shortcut" onClick={onAccount} aria-label="账号设置">
         <span>{user?.displayName.slice(0, 2).toUpperCase() || "--"}</span>
@@ -166,10 +170,10 @@ function Sidebar({ view, setView, onAccount, user }: { view: View; setView: (vie
 function MobileNav({ view, setView }: { view: View; setView: (view: View) => void }) {
   return (
     <nav className="mobile-nav" aria-label="移动端主导航">
-      <NavButton active={view === "today" || view === "workout"} label="今日" onClick={() => setView("today")} icon={<Dumbbell size={21} />} />
-      <NavButton active={view === "plan"} label="计划" onClick={() => setView("plan")} icon={<CalendarRange size={21} />} />
-      <NavButton active={view === "ranking"} label="排行" onClick={() => setView("ranking")} icon={<Trophy size={21} />} />
-      <NavButton active={view === "profile"} label="我的" onClick={() => setView("profile")} icon={<UserRound size={21} />} />
+      <NavButton active={view === "today" || view === "workout"} label="今日" onClick={() => setView("today")} icon="today" />
+      <NavButton active={view === "plan"} label="计划" onClick={() => setView("plan")} icon="plan" />
+      <NavButton active={view === "ranking"} label="排行" onClick={() => setView("ranking")} icon="ranking" />
+      <NavButton active={view === "profile"} label="我的" onClick={() => setView("profile")} icon="profile" />
     </nav>
   );
 }
@@ -194,7 +198,7 @@ function TodayView({ dashboard, activeWorkout, onStart, onResume, onPlan, starti
   const last = dashboard.lastSession;
   const plan = dashboard.todayPlan;
   const [selections, setSelections] = useState<Record<string, "primary" | "alternative">>({});
-  const letter = plan?.name.match(/[A-Z]$/u)?.[0] ?? "·";
+  const letter = plan ? (plan.name.match(/[A-Z]$/u)?.[0] ?? plan.name.slice(0, 1)) : null;
   const enabledDays = dashboard.plan.days.filter((day) => day.enabled);
   return (
     <section className="today-view page-view" data-testid="today-view">
@@ -203,13 +207,13 @@ function TodayView({ dashboard, activeWorkout, onStart, onResume, onPlan, starti
           <span className="eyebrow">{dayLabel}</span>
           <h1>{plan ? `今天，练${plan.name.replace(/\s*[A-Z]$/u, "")}` : "今天，让身体恢复"}</h1>
         </div>
-        <div className="streak"><Flame size={22} /><strong>{dashboard.summary.streak}</strong><span>连续训练日</span></div>
+        <div className="streak"><KineticIcon kind="streak" active size={23} /><strong>{dashboard.summary.streak}</strong><span>连续训练日</span></div>
       </header>
 
       <div className="today-grid">
         <div className="today-main">
           <section className="plan-hero">
-            <span className="plan-letter">{letter}</span>
+            <div className="training-status-slot"><TrainingStatusMark planLetter={letter} /></div>
             <div className="plan-copy">
               <span>{plan ? "今日计划" : "恢复日"}</span>
               <h2>{plan?.name ?? "没有固定训练"}</h2>
@@ -222,7 +226,7 @@ function TodayView({ dashboard, activeWorkout, onStart, onResume, onPlan, starti
           </section>
 
           <section className="exercise-list">
-            <div className="section-heading"><h3>{plan ? "今日动作" : "本周计划"}</h3><button className="text-action" onClick={onPlan}>编辑周计划</button></div>
+            <div className="section-heading"><div className="heading-with-symbol"><KineticIcon kind="plan" active size={18} /><h3>{plan ? "今日动作" : "本周计划"}</h3></div><button className="text-action" onClick={onPlan}>编辑周计划</button></div>
             {plan ? plan.exercises.map((item, index) => (
               <div key={item.id}>
                 <ExerciseRail item={item} index={index} current={index === 0} />
@@ -240,7 +244,7 @@ function TodayView({ dashboard, activeWorkout, onStart, onResume, onPlan, starti
 
         <aside className="today-aside">
           <div className="aside-block">
-            <span className="eyebrow">WEEKLY STATUS</span>
+            <div className="aside-label"><WeekStatusIcon /><span className="eyebrow">WEEKLY STATUS</span></div>
             <strong className="big-stat">{dashboard.summary.weeklyCount} / {dashboard.summary.weeklyTarget}</strong>
             <p>本周还剩 {Math.max(0, dashboard.summary.weeklyTarget - dashboard.summary.weeklyCount)} 次目标训练。</p>
             <div className="week-bars" aria-label="本周训练完成情况">
@@ -248,7 +252,7 @@ function TodayView({ dashboard, activeWorkout, onStart, onResume, onPlan, starti
             </div>
           </div>
           <div className="aside-block compact-rank">
-            <span className="eyebrow">FRIENDS</span>
+            <div className="aside-label"><KineticIcon kind="friends" size={17} /><span className="eyebrow">FRIENDS</span></div>
             <h3>本周进步榜</h3>
             {dashboard.leaderboard.slice(0, 3).map((friend) => (
               <div className="mini-rank" key={friend.rank}><b>{String(friend.rank).padStart(2, "0")}</b><span>{friend.isCurrentUser ? "我" : friend.name}</span><strong>{friend.progressPercent === null ? "建基线" : `${friend.progressPercent >= 0 ? "+" : ""}${friend.progressPercent}%`}</strong></div>
@@ -258,7 +262,7 @@ function TodayView({ dashboard, activeWorkout, onStart, onResume, onPlan, starti
       </div>
 
       {error && <p className="inline-error" role="alert">{error}</p>}
-      {(plan || activeWorkout) && <button className="primary-action" data-testid="start-workout" onClick={activeWorkout ? onResume : () => onStart(plan!.id, selections)} disabled={starting}><Play size={21} fill="currentColor" />{starting ? "正在同步…" : activeWorkout ? `继续 ${activeWorkout.planName}` : "开始训练"}</button>}
+      {(plan || activeWorkout) && <button className="primary-action" data-testid="start-workout" onClick={activeWorkout ? onResume : () => onStart(plan!.id, selections)} disabled={starting}><KineticIcon kind="start" active size={22} />{starting ? "正在同步…" : activeWorkout ? `继续 ${activeWorkout.planName}` : "开始训练"}</button>}
     </section>
   );
 }
@@ -370,7 +374,7 @@ function Leaderboard({ entries }: { entries: LeaderboardEntry[] }) {
 }
 
 function RankingView({ entries }: { entries: LeaderboardEntry[] }) {
-  return <section className="ranking-view page-view"><header className="page-header"><div><span className="eyebrow">FRIENDS / RANKING</span><h1>公平地看见进步</h1><p>不比较起点，只比较每个人相对自己的成长。</p></div><Trophy className="header-icon" /></header><div className="ranking-layout"><Leaderboard entries={entries} /><aside className="ranking-method"><span className="eyebrow">HOW IT WORKS</span><h2>不直接按重量排名</h2><p>性别、体重、初始力量都会影响绝对重量。练迹使用前后两个 28 天窗口的个人力量变化和训练稳定性计算榜单。</p><dl><div><dt>70%</dt><dd>相对力量进步</dd></div><div><dt>30%</dt><dd>训练稳定性</dd></div></dl></aside></div></section>;
+  return <section className="ranking-view page-view"><header className="page-header"><div><span className="eyebrow">FRIENDS / RANKING</span><h1>公平地看见进步</h1><p>不比较起点，只比较每个人相对自己的成长。</p></div><KineticIcon kind="ranking" active size={52} className="header-icon" /></header><div className="ranking-layout"><Leaderboard entries={entries} /><aside className="ranking-method"><span className="eyebrow">HOW IT WORKS</span><h2>不直接按重量排名</h2><p>性别、体重、初始力量都会影响绝对重量。练迹使用前后两个 28 天窗口的个人力量变化和训练稳定性计算榜单。</p><dl><div><dt>70%</dt><dd>相对力量进步</dd></div><div><dt>30%</dt><dd>训练稳定性</dd></div></dl></aside></div></section>;
 }
 
 function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut }: { user: AuthUser | null; dashboard: DashboardData | null; onClose: () => void; onAuthenticated: (user: AuthUser) => void; onLoggedOut: () => void }) {
@@ -466,6 +470,9 @@ export default function Home() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  const [bootRequestPhase, setBootRequestPhase] = useState<"checking" | "syncing">("checking");
+  const [bootVisible, setBootVisible] = useState(true);
+  const [brandLanded, setBrandLanded] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [activeWorkout, setActiveWorkout] = useState<ActiveWorkout | null>(null);
@@ -473,6 +480,7 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [workoutError, setWorkoutError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [visualPulse, setVisualPulse] = useState(0);
 
   async function loadDashboard(resumeWorkout = false) {
     setDashboardError(null);
@@ -499,7 +507,10 @@ export default function Home() {
       .then(async (result) => {
         setUser(result.user);
         setAccountOpen(!result.user);
-        if (result.user) await loadDashboard(true);
+        if (result.user) {
+          setBootRequestPhase("syncing");
+          await loadDashboard(true);
+        }
       })
       .catch(() => { setUser(null); setAccountOpen(true); })
       .finally(() => setCheckingSession(false));
@@ -542,6 +553,7 @@ export default function Home() {
     setResting(null);
     setView("today");
     setNotice("训练完成，全部动作已同步");
+    setVisualPulse((value) => value + 1);
     await loadDashboard();
   }
 
@@ -597,6 +609,7 @@ export default function Home() {
       const result = await apiRequest<{ plan: TrainingPlan }>("/api/plans/active", { method: "PUT", body: JSON.stringify(plan) });
       setDashboard((current) => current ? { ...current, plan: result.plan } : current);
       setNotice("周计划已保存并同步");
+      setVisualPulse((value) => value + 1);
       await loadDashboard();
     } catch (requestError) {
       setWorkoutError(requestError instanceof Error ? requestError.message : "计划保存失败");
@@ -607,6 +620,39 @@ export default function Home() {
   }
 
   const currentWorkoutExercise = activeWorkout?.exercises.find((exercise) => !exercise.completedAt) ?? null;
+  const finishBoot = useCallback(() => {
+    setBootVisible(false);
+    setBrandLanded(true);
+  }, []);
+  const bootPhase: BootPhase = checkingSession
+    ? bootRequestPhase
+    : dashboardError && user && !dashboard
+      ? "error"
+      : !user || dashboard
+        ? "ready"
+        : "syncing";
+  const kineticMode: KineticMode = bootVisible
+    ? "boot"
+    : resting
+      ? "rest"
+      : view === "profile"
+        ? "profile"
+        : view;
+  const kineticIntensity: KineticIntensity = dashboardError || workoutError
+    ? "error"
+    : notice
+      ? "success"
+      : saving || view === "workout"
+        ? "active"
+        : "idle";
+  const kineticProgress = dashboard?.summary.weeklyTarget
+    ? dashboard.summary.weeklyCount / dashboard.summary.weeklyTarget
+    : 0;
+
+  async function retryBoot() {
+    setBootRequestPhase("syncing");
+    await loadDashboard(true);
+  }
 
   const content = checkingSession ? <div className="screen-state"><Activity size={28} /><strong>正在恢复训练轨迹</strong><p>检查账号和云端同步状态…</p></div>
     : !user ? <div className="screen-state"><UserRound size={28} /><strong>登录后开始训练</strong><p>账号入口已打开。</p></div>
@@ -619,13 +665,19 @@ export default function Home() {
     : <ProfileView dashboard={dashboard} onAccount={() => setAccountOpen(true)} />;
 
   return (
-    <main className="app-shell">
-      <Sidebar view={view} setView={setView} onAccount={() => setAccountOpen(true)} user={user} />
-      <div className="app-content">{content}</div>
-      {view !== "workout" && user && <MobileNav view={view} setView={setView} />}
-      {resting && <WorkoutRestOverlay exercise={resting.exercise} completedSet={resting.completedSet} onContinue={() => setResting(null)} onFinish={() => finishExercise(resting.exercise.id)} />}
-      {(accountOpen || !user) && !checkingSession && <AccountDialog user={user} dashboard={dashboard} onClose={() => setAccountOpen(false)} onAuthenticated={(authenticatedUser) => { setUser(authenticatedUser); setAccountOpen(false); setDashboard(null); void loadDashboard(); }} onLoggedOut={() => { setUser(null); setDashboard(null); setAccountOpen(true); setView("today"); }} />}
-      {notice && <div className="sync-toast" role="status"><Check size={18} />{notice}</div>}
+    <main className={`app-shell ${brandLanded ? "boot-arrived" : ""}`.trim()}>
+      <KineticField mode={kineticMode} intensity={kineticIntensity} progress={kineticProgress} pulseKey={visualPulse} />
+      <div className={`app-runtime ${bootVisible ? "boot-active" : ""}`.trim()} inert={bootVisible} aria-hidden={bootVisible ? true : undefined}>
+        <Sidebar view={view} setView={setView} onAccount={() => setAccountOpen(true)} user={user} />
+        <div className="app-content">
+          {view === "workout" ? content : <KineticPageTransition pageKey={`${view}-${checkingSession ? "checking" : user ? "ready" : "guest"}`} suspended={bootVisible}>{content}</KineticPageTransition>}
+        </div>
+        {view !== "workout" && user && <MobileNav view={view} setView={setView} />}
+        {resting && <WorkoutRestOverlay exercise={resting.exercise} completedSet={resting.completedSet} onContinue={() => setResting(null)} onFinish={() => finishExercise(resting.exercise.id)} />}
+        {(accountOpen || !user) && !checkingSession && <AccountDialog user={user} dashboard={dashboard} onClose={() => setAccountOpen(false)} onAuthenticated={(authenticatedUser) => { setUser(authenticatedUser); setAccountOpen(false); setDashboard(null); void loadDashboard(); }} onLoggedOut={() => { setUser(null); setDashboard(null); setAccountOpen(true); setView("today"); }} />}
+        {notice && <div className="sync-toast" role="status"><Check size={18} />{notice}</div>}
+      </div>
+      {bootVisible && <AppBootSequence phase={bootPhase} error={dashboardError} onRetry={() => void retryBoot()} onFinished={finishBoot} />}
     </main>
   );
 }
