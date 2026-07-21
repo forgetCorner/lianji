@@ -1,5 +1,6 @@
 import { ensureDatabase, getD1 } from "@/db";
 import type { AuthUser } from "@/lib/server/auth";
+import { getActivePlan, shanghaiWeekday } from "@/lib/server/plans";
 
 type SessionRow = {
   id: string;
@@ -10,6 +11,7 @@ type SessionRow = {
   duration_seconds: number;
   set_count: number;
   volume_kg: number;
+  plan_day_id: string | null;
 };
 
 type SetRow = {
@@ -102,6 +104,7 @@ function buildLeaderboard(users: UserRow[], sets: SetRow[], now: number, current
 export async function buildDashboard(user: AuthUser) {
   await ensureDatabase();
   const database = getD1();
+  const plan = await getActivePlan(user.id);
   const now = Date.now();
   const yearAgo = now - 366 * 24 * 60 * 60 * 1000;
   const fiftySixDaysAgo = now - 56 * 24 * 60 * 60 * 1000;
@@ -109,16 +112,16 @@ export async function buildDashboard(user: AuthUser) {
     database.prepare(
       `SELECT workout_sessions.id, workout_sessions.user_id, workout_sessions.plan_name, workout_sessions.started_at,
         workout_sessions.completed_at, workout_sessions.duration_seconds, COUNT(workout_sets.id) AS set_count,
-        COALESCE(SUM(workout_sets.weight_kg * workout_sets.reps), 0) AS volume_kg
+        COALESCE(SUM(workout_sets.weight_kg * workout_sets.reps), 0) AS volume_kg, workout_sessions.plan_day_id
        FROM workout_sessions LEFT JOIN workout_sets ON workout_sets.workout_session_id = workout_sessions.id
        WHERE workout_sessions.user_id = ? AND workout_sessions.started_at >= ?
        GROUP BY workout_sessions.id ORDER BY workout_sessions.started_at DESC`,
     ).bind(user.id, yearAgo).all<SessionRow>(),
     database.prepare(
-      "SELECT user_id, exercise_id, exercise_name, weight_kg, reps, completed_at FROM workout_sets WHERE user_id = ? AND completed_at >= ? ORDER BY completed_at",
+      "SELECT user_id, exercise_id, exercise_name, weight_kg, reps, completed_at FROM workout_sets WHERE user_id = ? AND completed_at >= ? AND tracking_type = 'weight_reps' AND weight_kg > 0 AND reps > 0 ORDER BY completed_at",
     ).bind(user.id, yearAgo).all<SetRow>(),
     database.prepare(
-      "SELECT user_id, exercise_id, exercise_name, weight_kg, reps, completed_at FROM workout_sets WHERE completed_at >= ?",
+      "SELECT user_id, exercise_id, exercise_name, weight_kg, reps, completed_at FROM workout_sets WHERE completed_at >= ? AND tracking_type = 'weight_reps' AND weight_kg > 0 AND reps > 0",
     ).bind(fiftySixDaysAgo).all<SetRow>(),
     database.prepare("SELECT id, display_name FROM users ORDER BY created_at").all<UserRow>(),
   ]);
@@ -127,7 +130,7 @@ export async function buildDashboard(user: AuthUser) {
   const sets = currentSetResult.results;
   const completedSessions = sessions.filter((session) => session.completed_at);
   const weekStart = startOfShanghaiWeek(now);
-  const weeklyCount = completedSessions.filter((session) => session.completed_at! >= weekStart).length;
+  const weeklyCount = new Set(completedSessions.filter((session) => session.completed_at! >= weekStart).map((session) => session.plan_day_id ?? session.id)).size;
   const activity = new Map<string, number>();
   for (const session of completedSessions) {
     const key = dateKey(session.completed_at!);
@@ -145,20 +148,11 @@ export async function buildDashboard(user: AuthUser) {
 
   return {
     user,
-    todayPlan: {
-      id: "full-body-a",
-      name: "全身 A",
-      summary: "腿 + 胸 + 背 · 约 45 分钟",
-      weeklyTarget: 3,
-      exercises: [
-        { id: "seated-row", name: "坐姿划船", muscleGroup: "背部 · 器械", target: "4×8–12" },
-        { id: "squat", name: "深蹲", muscleGroup: "腿部 · 杠铃", target: "4×8–10" },
-        { id: "dumbbell-bench", name: "哑铃卧推", muscleGroup: "胸部 · 哑铃", target: "3×10" },
-      ],
-    },
+    plan,
+    todayPlan: plan.days.find((day) => day.enabled && day.exercises.length > 0 && day.weekday === shanghaiWeekday(now)) ?? null,
     summary: {
       weeklyCount,
-      weeklyTarget: 3,
+      weeklyTarget: plan.days.filter((day) => day.enabled && day.exercises.length > 0).length,
       streak: calculateStreak(completedSessions, now),
       totalWorkouts: completedSessions.length,
     },

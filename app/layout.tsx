@@ -29,9 +29,9 @@ export async function generateMetadata(): Promise<Metadata> {
       title: "练迹｜记录每一次进步",
       description: "训练记录、进步趋势与公平排行榜。",
       type: "website",
-      images: [{ url: "/og.png", width: 1200, height: 630, alt: "练迹，记录每一次进步" }],
+      images: [{ url: "/og-training-plan.png", width: 1200, height: 630, alt: "练迹，把一周练成自己的节奏" }],
     },
-    twitter: { card: "summary_large_image", images: ["/og.png"] },
+    twitter: { card: "summary_large_image", images: ["/og-training-plan.png"] },
   };
 }
 

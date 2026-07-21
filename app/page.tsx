@@ -2,20 +2,16 @@
 
 import {
   Activity,
-  ArrowLeft,
   CalendarDays,
+  CalendarRange,
   Check,
   ChevronDown,
   CircleUserRound,
   Dumbbell,
   Flame,
   History,
-  Minus,
-  MoreHorizontal,
   Play,
-  Plus,
   Settings,
-  SkipForward,
   Trophy,
   UserRound,
   X,
@@ -30,12 +26,16 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { targetLabel, weekdays } from "@/lib/training";
+import type { ActiveWorkout, PlanExercise, TrainingDay, TrainingPlan, WorkoutExercise } from "@/lib/training";
+import { TrainingPlanView } from "@/components/training-plan-view";
+import { ActiveWorkoutView, WorkoutRestOverlay } from "@/components/active-workout-view";
+import type { SetInput } from "@/components/active-workout-view";
 
-type View = "today" | "history" | "ranking" | "profile" | "workout";
+type View = "today" | "plan" | "history" | "ranking" | "profile" | "workout";
 type FrequencyPeriod = "year" | "12w" | "4w";
 
 type AuthUser = { id: string; username: string; displayName: string; createdAt: number };
-type PlanExercise = { id: string; name: string; muscleGroup: string; target: string };
 type WorkoutSummary = {
   id: string;
   plan_name: string;
@@ -56,7 +56,8 @@ type LeaderboardEntry = {
 };
 type DashboardData = {
   user: AuthUser;
-  todayPlan: { id: string; name: string; summary: string; weeklyTarget: number; exercises: PlanExercise[] };
+  plan: TrainingPlan;
+  todayPlan: TrainingDay | null;
   summary: { weeklyCount: number; weeklyTarget: number; streak: number; totalWorkouts: number };
   lastSession: WorkoutSummary | null;
   activity: { date: string; count: number }[];
@@ -138,6 +139,7 @@ function Sidebar({ view, setView, onAccount, user }: { view: View; setView: (vie
       <Brand />
       <nav className="side-nav" aria-label="主导航">
         <NavButton active={view === "today" || view === "workout"} label="今日" onClick={() => setView("today")} icon={<Dumbbell size={23} />} />
+        <NavButton active={view === "plan"} label="计划" onClick={() => setView("plan")} icon={<CalendarRange size={23} />} />
         <NavButton active={view === "history"} label="历史" onClick={() => setView("history")} icon={<History size={23} />} />
         <NavButton active={view === "ranking"} label="排行" onClick={() => setView("ranking")} icon={<Trophy size={23} />} />
         <NavButton active={view === "profile"} label="我的" onClick={() => setView("profile")} icon={<UserRound size={23} />} />
@@ -154,6 +156,7 @@ function MobileNav({ view, setView }: { view: View; setView: (view: View) => voi
   return (
     <nav className="mobile-nav" aria-label="移动端主导航">
       <NavButton active={view === "today" || view === "workout"} label="今日" onClick={() => setView("today")} icon={<Dumbbell size={21} />} />
+      <NavButton active={view === "plan"} label="计划" onClick={() => setView("plan")} icon={<CalendarRange size={21} />} />
       <NavButton active={view === "history"} label="历史" onClick={() => setView("history")} icon={<History size={21} />} />
       <NavButton active={view === "ranking"} label="排行" onClick={() => setView("ranking")} icon={<Trophy size={21} />} />
       <NavButton active={view === "profile"} label="我的" onClick={() => setView("profile")} icon={<UserRound size={21} />} />
@@ -169,22 +172,26 @@ function ExerciseRail({ item, index, current = false }: { item: PlanExercise; in
         <strong>{item.name}</strong>
         <small>{item.muscleGroup}</small>
       </span>
-      <b>{item.target}</b>
+      <b>{targetLabel(item)}</b>
     </div>
   );
 }
 
-function TodayView({ dashboard, onStart, starting, error }: { dashboard: DashboardData; onStart: () => void; starting: boolean; error: string | null }) {
+function TodayView({ dashboard, activeWorkout, onStart, onResume, onPlan, starting, error }: { dashboard: DashboardData; activeWorkout: ActiveWorkout | null; onStart: (dayId: string, selections?: Record<string, "primary" | "alternative">) => void; onResume: () => void; onPlan: () => void; starting: boolean; error: string | null }) {
   const now = new Date();
   const dayLabel = new Intl.DateTimeFormat("zh-CN", { month: "short", day: "2-digit", weekday: "short" }).format(now);
   const weeklyBars = Array.from({ length: dashboard.summary.weeklyTarget }, (_, index) => index < dashboard.summary.weeklyCount);
   const last = dashboard.lastSession;
+  const plan = dashboard.todayPlan;
+  const [selections, setSelections] = useState<Record<string, "primary" | "alternative">>({});
+  const letter = plan?.name.match(/[A-Z]$/u)?.[0] ?? "·";
+  const enabledDays = dashboard.plan.days.filter((day) => day.enabled);
   return (
     <section className="today-view page-view" data-testid="today-view">
       <header className="today-header">
         <div>
           <span className="eyebrow">{dayLabel}</span>
-          <h1>今天，练{dashboard.todayPlan.name.replace(/\s*[A-Z]$/u, "")}</h1>
+          <h1>{plan ? `今天，练${plan.name.replace(/\s*[A-Z]$/u, "")}` : "今天，让身体恢复"}</h1>
         </div>
         <div className="streak"><Flame size={22} /><strong>{dashboard.summary.streak}</strong><span>连续训练日</span></div>
       </header>
@@ -192,11 +199,11 @@ function TodayView({ dashboard, onStart, starting, error }: { dashboard: Dashboa
       <div className="today-grid">
         <div className="today-main">
           <section className="plan-hero">
-            <span className="plan-letter">A</span>
+            <span className="plan-letter">{letter}</span>
             <div className="plan-copy">
-              <span>今日计划</span>
-              <h2>{dashboard.todayPlan.name}</h2>
-              <p>{dashboard.todayPlan.summary}</p>
+              <span>{plan ? "今日计划" : "恢复日"}</span>
+              <h2>{plan?.name ?? "没有固定训练"}</h2>
+              <p>{plan ? `${plan.focus} · ${plan.exercises.length} 个动作` : "训练安排由你决定。可以休息，也可以从本周计划中任选一套自由训练。"}</p>
             </div>
             <div className="weekly-progress">
               <strong>本周 {dashboard.summary.weeklyCount} / {dashboard.summary.weeklyTarget}</strong>
@@ -205,8 +212,13 @@ function TodayView({ dashboard, onStart, starting, error }: { dashboard: Dashboa
           </section>
 
           <section className="exercise-list">
-            <div className="section-heading"><h3>今日动作</h3><span>{dashboard.todayPlan.exercises.length} 个动作</span></div>
-            {dashboard.todayPlan.exercises.map((item, index) => <ExerciseRail key={item.id} item={item} index={index} current={index === 0} />)}
+            <div className="section-heading"><h3>{plan ? "今日动作" : "本周计划"}</h3><button className="text-action" onClick={onPlan}>编辑周计划</button></div>
+            {plan ? plan.exercises.map((item, index) => (
+              <div key={item.id}>
+                <ExerciseRail item={item} index={index} current={index === 0} />
+                {item.alternativeName && <div className="alternative-choice" aria-label={`${item.name}备选动作`}><span>本次选择</span><button className={selections[item.id] !== "alternative" ? "active" : ""} onClick={() => setSelections((value) => ({ ...value, [item.id]: "primary" }))}>{item.name}</button><button className={selections[item.id] === "alternative" ? "active" : ""} onClick={() => setSelections((value) => ({ ...value, [item.id]: "alternative" }))}>{item.alternativeName}</button></div>}
+              </div>
+            )) : enabledDays.map((day) => <button className="free-plan-row" key={day.id} onClick={() => onStart(day.id)} disabled={starting}><span>{weekdays.find((item) => item.value === day.weekday)?.label}</span><strong>{day.name}</strong><small>{day.focus} · {day.exercises.length} 个动作</small><Play size={16} /></button>)}
           </section>
 
           <div className="last-session">
@@ -236,84 +248,8 @@ function TodayView({ dashboard, onStart, starting, error }: { dashboard: Dashboa
       </div>
 
       {error && <p className="inline-error" role="alert">{error}</p>}
-      <button className="primary-action" data-testid="start-workout" onClick={onStart} disabled={starting}><Play size={21} fill="currentColor" />{starting ? "正在同步…" : "开始训练"}</button>
+      {(plan || activeWorkout) && <button className="primary-action" data-testid="start-workout" onClick={activeWorkout ? onResume : () => onStart(plan!.id, selections)} disabled={starting}><Play size={21} fill="currentColor" />{starting ? "正在同步…" : activeWorkout ? `继续 ${activeWorkout.planName}` : "开始训练"}</button>}
     </section>
-  );
-}
-
-function WorkoutView({ exercise, setIndex, startedAt, onBack, onComplete, saving, error }: { exercise: PlanExercise; setIndex: number; startedAt: number; onBack: () => void; onComplete: (weight: number, reps: number) => void; saving: boolean; error: string | null }) {
-  const [weight, setWeight] = useState(55);
-  const [reps, setReps] = useState(10);
-  const [elapsed, setElapsed] = useState(() => Math.max(0, Math.round((Date.now() - startedAt) / 1000)));
-  useEffect(() => {
-    const timer = window.setInterval(() => setElapsed(Math.max(0, Math.round((Date.now() - startedAt) / 1000))), 1000);
-    return () => window.clearInterval(timer);
-  }, [startedAt]);
-  const elapsedLabel = `${String(Math.floor(elapsed / 3600)).padStart(2, "0")}:${String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
-  return (
-    <section className="workout-view page-view" data-testid="workout-view">
-      <header className="workout-header">
-        <button onClick={onBack} aria-label="返回今日训练"><ArrowLeft /></button>
-        <div><span>训练中 · 已同步</span><strong>{elapsedLabel}</strong></div>
-        <button aria-label="更多操作"><MoreHorizontal /></button>
-      </header>
-
-      <div className="workout-focus">
-        <div className="workout-title">
-          <span className="eyebrow orange">{String(setIndex).padStart(2, "0")} / 04</span>
-          <h1>{exercise.name}</h1>
-          <p>中立握 · 胸椎稳定 · 肘向后收</p>
-          <div className="focus-line"><i /><span>{exercise.muscleGroup}</span></div>
-        </div>
-        <Dumbbell className="workout-watermark" strokeWidth={1.25} />
-      </div>
-
-      <div className="metrics">
-        <div className="metric">
-          <span>WEIGHT</span>
-          <div className="metric-control"><button aria-label="减少重量" onClick={() => setWeight((v) => Math.max(0, v - 2.5))}><Minus /></button><strong>{weight}</strong><em>kg</em><button aria-label="增加重量" onClick={() => setWeight((v) => v + 2.5)}><Plus /></button></div>
-          <small>左右按钮微调</small>
-        </div>
-        <div className="metric">
-          <span>REPS</span>
-          <div className="metric-control"><button aria-label="减少次数" onClick={() => setReps((v) => Math.max(1, v - 1))}><Minus /></button><strong>{reps}</strong><em className="orange">次</em><button aria-label="增加次数" onClick={() => setReps((v) => v + 1)}><Plus /></button></div>
-          <small>目标 8–12 次</small>
-        </div>
-      </div>
-
-      <section className="sets-progress">
-        <span className="eyebrow">SETS</span>
-        <div className="set-track">
-          {[1, 2, 3, 4].map((set) => <span key={set} className={set < setIndex ? "done" : set === setIndex ? "current" : ""}><i />{set}</span>)}
-        </div>
-      </section>
-
-      <div className="technique"><span>TECHNIQUE</span><strong>回拉时停顿 1 秒，肩膀不要耸起</strong><small>拉时呼气 · 放时吸气</small></div>
-      <div className="previous-set"><span>当前记录</span><strong>{weight} kg × {reps}</strong><b>实时保存</b><small>第 {setIndex} 组 / 共 4 组</small><em>{elapsedLabel}</em></div>
-      {error && <p className="inline-error" role="alert">{error}</p>}
-      <button className="primary-action complete-action" data-testid="complete-set" onClick={() => onComplete(weight, reps)} disabled={saving}><Check size={22} />{saving ? "正在保存…" : setIndex === 4 ? "完成训练" : "完成本组"}</button>
-    </section>
-  );
-}
-
-function RestOverlay({ onContinue, completedSet }: { onContinue: () => void; completedSet: number }) {
-  const [seconds, setSeconds] = useState(88);
-  useEffect(() => {
-    const timer = window.setInterval(() => setSeconds((value) => value <= 1 ? 90 : value - 1), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-  const time = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-  return (
-    <div className="rest-overlay" role="dialog" aria-modal="true" aria-label="休息计时" data-testid="rest-overlay">
-      <div className="rest-top"><span>SET {String(completedSet).padStart(2, "0")} COMPLETE · 已同步</span><small>点击下方按钮可提前继续</small></div>
-      <div className="timer-ring"><strong>{time}</strong><span>REST / 90 SEC</span><Activity size={22} /></div>
-      <div className="next-set">
-        <span>NEXT SET</span><h2>坐姿划船 · 第 {completedSet + 1} 组</h2><strong>保持刚才的节奏</strong><p>动作质量优先，重量可在下一组调整</p>
-        <div className="next-progress"><i /><i /><i /><i /></div>
-      </div>
-      <button className="primary-action" data-testid="continue-workout" onClick={onContinue}><Play size={21} fill="currentColor" />提前开始下一组</button>
-      <button className="text-action" onClick={onContinue}><SkipForward size={15} />跳过休息</button>
-    </div>
   );
 }
 
@@ -509,17 +445,22 @@ export default function Home() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [activeWorkout, setActiveWorkout] = useState<{ id: string; startedAt: number } | null>(null);
-  const [currentSet, setCurrentSet] = useState(1);
-  const [resting, setResting] = useState(false);
+  const [activeWorkout, setActiveWorkout] = useState<ActiveWorkout | null>(null);
+  const [resting, setResting] = useState<{ exercise: WorkoutExercise; completedSet: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [workoutError, setWorkoutError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  async function loadDashboard() {
+  async function loadDashboard(resumeWorkout = false) {
     setDashboardError(null);
     try {
-      setDashboard(await apiRequest<DashboardData>("/api/dashboard"));
+      const [nextDashboard, activeResult] = await Promise.all([
+        apiRequest<DashboardData>("/api/dashboard"),
+        apiRequest<{ workout: ActiveWorkout | null }>("/api/workouts/active"),
+      ]);
+      setDashboard(nextDashboard);
+      setActiveWorkout(activeResult.workout);
+      if (resumeWorkout && activeResult.workout?.exercises.some((exercise) => !exercise.completedAt)) setView("workout");
     } catch (requestError) {
       if (requestError instanceof ApiRequestError && requestError.status === 401) {
         setUser(null);
@@ -535,7 +476,7 @@ export default function Home() {
       .then(async (result) => {
         setUser(result.user);
         setAccountOpen(!result.user);
-        if (result.user) await loadDashboard();
+        if (result.user) await loadDashboard(true);
       })
       .catch(() => { setUser(null); setAccountOpen(true); })
       .finally(() => setCheckingSession(false));
@@ -547,17 +488,20 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  async function startWorkout() {
+  async function startWorkout(dayId: string, selections: Record<string, "primary" | "alternative"> = {}) {
     if (!dashboard) return;
+    if (activeWorkout) {
+      setView("workout");
+      return;
+    }
     setSaving(true);
     setWorkoutError(null);
     try {
-      const result = await apiRequest<{ workout: { id: string; startedAt: number } }>("/api/workouts", {
+      const result = await apiRequest<{ workout: ActiveWorkout }>("/api/workouts", {
         method: "POST",
-        body: JSON.stringify({ planName: dashboard.todayPlan.name }),
+        body: JSON.stringify({ planDayId: dayId, selections }),
       });
       setActiveWorkout(result.workout);
-      setCurrentSet(1);
       setView("workout");
     } catch (requestError) {
       setWorkoutError(requestError instanceof Error ? requestError.message : "训练创建失败");
@@ -566,27 +510,55 @@ export default function Home() {
     }
   }
 
-  async function saveSet(weight: number, reps: number) {
-    if (!activeWorkout || !dashboard) return;
+  async function completeWorkout(workout: ActiveWorkout) {
+    await apiRequest(`/api/workouts/${workout.id}/complete`, {
+      method: "POST",
+      body: JSON.stringify({ durationSeconds: Math.max(1, Math.round((Date.now() - workout.startedAt) / 1000)) }),
+    });
+    setActiveWorkout(null);
+    setResting(null);
+    setView("today");
+    setNotice("训练完成，全部动作已同步");
+    await loadDashboard();
+  }
+
+  async function advanceAfterExercise(workout: ActiveWorkout) {
+    setActiveWorkout(workout);
+    setResting(null);
+    if (!workout.exercises.some((exercise) => !exercise.completedAt)) await completeWorkout(workout);
+  }
+
+  async function finishExercise(exerciseId: string, skipped = false) {
+    if (!activeWorkout) return;
     setSaving(true);
     setWorkoutError(null);
     try {
-      const exercise = dashboard.todayPlan.exercises[0];
-      await apiRequest(`/api/workouts/${activeWorkout.id}/sets`, {
+      const result = await apiRequest<{ workout: ActiveWorkout }>(`/api/workouts/${activeWorkout.id}/exercises/${exerciseId}/complete`, {
         method: "POST",
-        body: JSON.stringify({ exerciseId: exercise.id, exerciseName: exercise.name, muscleGroup: exercise.muscleGroup, setIndex: currentSet, weightKg: weight, reps }),
+        body: JSON.stringify({ skipped }),
       });
-      if (currentSet === 4) {
-        await apiRequest(`/api/workouts/${activeWorkout.id}/complete`, {
-          method: "POST",
-          body: JSON.stringify({ durationSeconds: Math.max(1, Math.round((Date.now() - activeWorkout.startedAt) / 1000)) }),
-        });
-        setActiveWorkout(null);
-        setView("today");
-        setNotice("训练完成，记录已同步");
-        await loadDashboard();
+      await advanceAfterExercise(result.workout);
+    } catch (requestError) {
+      setWorkoutError(requestError instanceof Error ? requestError.message : "动作状态更新失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveSet(input: SetInput) {
+    if (!activeWorkout) return;
+    setSaving(true);
+    setWorkoutError(null);
+    try {
+      const result = await apiRequest<{ workout: ActiveWorkout }>(`/api/workouts/${activeWorkout.id}/sets`, { method: "POST", body: JSON.stringify(input) });
+      const updatedExercise = result.workout.exercises.find((exercise) => exercise.id === input.workoutExerciseId);
+      setActiveWorkout(result.workout);
+      if (!updatedExercise) throw new Error("训练动作同步失败");
+      if (updatedExercise.sets.length >= updatedExercise.maxSets) {
+        const completed = await apiRequest<{ workout: ActiveWorkout }>(`/api/workouts/${activeWorkout.id}/exercises/${updatedExercise.id}/complete`, { method: "POST", body: JSON.stringify({ skipped: false }) });
+        await advanceAfterExercise(completed.workout);
       } else {
-        setResting(true);
+        setResting({ exercise: updatedExercise, completedSet: updatedExercise.sets.length });
       }
     } catch (requestError) {
       setWorkoutError(requestError instanceof Error ? requestError.message : "本组保存失败");
@@ -595,17 +567,31 @@ export default function Home() {
     }
   }
 
-  function continueWorkout() {
-    setCurrentSet((value) => value + 1);
-    setResting(false);
+  async function savePlan(plan: TrainingPlan) {
+    setSaving(true);
+    setWorkoutError(null);
+    try {
+      const result = await apiRequest<{ plan: TrainingPlan }>("/api/plans/active", { method: "PUT", body: JSON.stringify(plan) });
+      setDashboard((current) => current ? { ...current, plan: result.plan } : current);
+      setNotice("周计划已保存并同步");
+      await loadDashboard();
+    } catch (requestError) {
+      setWorkoutError(requestError instanceof Error ? requestError.message : "计划保存失败");
+      throw requestError;
+    } finally {
+      setSaving(false);
+    }
   }
+
+  const currentWorkoutExercise = activeWorkout?.exercises.find((exercise) => !exercise.completedAt) ?? null;
 
   const content = checkingSession ? <div className="screen-state"><Activity size={28} /><strong>正在恢复训练轨迹</strong><p>检查账号和云端同步状态…</p></div>
     : !user ? <div className="screen-state"><UserRound size={28} /><strong>登录后开始训练</strong><p>账号入口已打开。</p></div>
     : dashboardError ? <div className="screen-state"><Activity size={28} /><strong>同步暂时失败</strong><p>{dashboardError}</p><button className="secondary-action" onClick={loadDashboard}>重新同步</button></div>
     : !dashboard ? <div className="screen-state"><Activity size={28} /><strong>正在读取真实数据</strong></div>
-    : view === "today" ? <TodayView dashboard={dashboard} onStart={startWorkout} starting={saving} error={workoutError} />
-    : view === "workout" && activeWorkout ? <WorkoutView exercise={dashboard.todayPlan.exercises[0]} setIndex={currentSet} startedAt={activeWorkout.startedAt} onBack={() => setView("today")} onComplete={saveSet} saving={saving} error={workoutError} />
+    : view === "today" ? <TodayView dashboard={dashboard} activeWorkout={activeWorkout} onStart={startWorkout} onResume={() => setView("workout")} onPlan={() => setView("plan")} starting={saving} error={workoutError} />
+    : view === "plan" ? <TrainingPlanView key={dashboard.plan.version} plan={dashboard.plan} onSave={savePlan} saving={saving} error={workoutError} />
+    : view === "workout" && activeWorkout && currentWorkoutExercise ? <ActiveWorkoutView key={currentWorkoutExercise.id} workout={activeWorkout} exercise={currentWorkoutExercise} onBack={() => setView("today")} onSaveSet={saveSet} onSkip={() => finishExercise(currentWorkoutExercise.id, true)} saving={saving} error={workoutError} />
     : view === "history" ? <HistoryView dashboard={dashboard} />
     : view === "ranking" ? <RankingView entries={dashboard.leaderboard} />
     : <ProfileView dashboard={dashboard} onAccount={() => setAccountOpen(true)} />;
@@ -615,7 +601,7 @@ export default function Home() {
       <Sidebar view={view} setView={setView} onAccount={() => setAccountOpen(true)} user={user} />
       <div className="app-content">{content}</div>
       {view !== "workout" && user && <MobileNav view={view} setView={setView} />}
-      {resting && <RestOverlay completedSet={currentSet} onContinue={continueWorkout} />}
+      {resting && <WorkoutRestOverlay exercise={resting.exercise} completedSet={resting.completedSet} onContinue={() => setResting(null)} onFinish={() => finishExercise(resting.exercise.id)} />}
       {(accountOpen || !user) && !checkingSession && <AccountDialog user={user} onClose={() => setAccountOpen(false)} onAuthenticated={(authenticatedUser) => { setUser(authenticatedUser); setAccountOpen(false); setDashboard(null); void loadDashboard(); }} onLoggedOut={() => { setUser(null); setDashboard(null); setAccountOpen(true); setView("today"); }} />}
       {notice && <div className="sync-toast" role="status"><Check size={18} />{notice}</div>}
     </main>

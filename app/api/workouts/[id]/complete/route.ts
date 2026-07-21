@@ -15,7 +15,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const notes = typeof body?.notes === "string" ? body.notes.trim().slice(0, 1000) : "";
 
     await ensureDatabase();
-    const result = await getD1().prepare(
+    const database = getD1();
+    const incomplete = await database.prepare(
+      "SELECT COUNT(*) AS count FROM workout_exercises WHERE workout_session_id = ? AND user_id = ? AND completed_at IS NULL",
+    ).bind(id, user.id).first<{ count: number }>();
+    if ((incomplete?.count ?? 0) > 0) return jsonError(409, "CONFLICT", "还有动作未完成");
+    const result = await database.prepare(
       "UPDATE workout_sessions SET completed_at = ?, duration_seconds = ?, notes = ? WHERE id = ? AND user_id = ? AND completed_at IS NULL",
     ).bind(completedAt, durationSeconds, notes, id, user.id).run();
     if (!result.meta.changes) return jsonError(404, "NOT_FOUND", "未找到可完成的训练");
