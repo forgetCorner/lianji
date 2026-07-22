@@ -1,6 +1,7 @@
 import { getSessionUser } from "@/lib/server/auth";
 import { jsonError, jsonOk, readJsonObject, serverError, validateMutationRequest } from "@/lib/server/http";
 import { getActivePlan, replaceActivePlan } from "@/lib/server/plans";
+import { reconcileTodayPlanWorkout } from "@/lib/server/workouts";
 import type { PlanExercise, TrackingType, TrainingDay, TrainingPlan, WeightMode } from "@/lib/training";
 
 const trackingTypes = new Set<TrackingType>(["weight_reps", "duration", "bodyweight_reps", "bodyweight_duration"]);
@@ -63,6 +64,8 @@ function parsePlan(body: Record<string, unknown> | null): TrainingPlan | null {
   const version = integer(body.version, 0, 1, Number.MAX_SAFE_INTEGER);
   if (!id || !name || !version || body.days.length !== 7) return null;
   const seen = new Set<number>();
+  const dayIds = new Set<string>();
+  const exerciseIds = new Set<string>();
   const days: TrainingDay[] = [];
   for (const [position, value] of body.days.entries()) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -72,10 +75,14 @@ function parsePlan(body: Record<string, unknown> | null): TrainingPlan | null {
     seen.add(weekday);
     const exercises = row.exercises.map(parseExercise).filter((exercise): exercise is PlanExercise => Boolean(exercise));
     if (exercises.length !== row.exercises.length) return null;
+    const dayId = text(row.id, 80) || crypto.randomUUID();
+    if (dayIds.has(dayId) || exercises.some((exercise) => exerciseIds.has(exercise.id))) return null;
+    dayIds.add(dayId);
+    exercises.forEach((exercise) => exerciseIds.add(exercise.id));
     const enabled = Boolean(row.enabled);
     if (enabled && !exercises.length) return null;
     days.push({
-      id: text(row.id, 80) || crypto.randomUUID(),
+      id: dayId,
       weekday,
       name: text(row.name, 60) || "训练日",
       focus: text(row.focus, 100),
@@ -107,7 +114,7 @@ export async function PUT(request: Request): Promise<Response> {
     if (!plan) return jsonError(400, "BAD_REQUEST", "训练计划数据不完整");
     const saved = await replaceActivePlan(user.id, plan);
     if (!saved) return jsonError(409, "CONFLICT", "计划已在其他设备更新，请重新加载后再保存");
-    return jsonOk({ plan: saved });
+    return jsonOk({ plan: saved, todayWorkout: await reconcileTodayPlanWorkout(user.id, saved) });
   } catch (error) {
     return serverError(error);
   }

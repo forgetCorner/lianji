@@ -2,7 +2,8 @@ import { ensureDatabase, getD1 } from "@/db";
 import { getSessionUser } from "@/lib/server/auth";
 import { jsonError, jsonOk, readJsonObject, serverError, validateMutationRequest } from "@/lib/server/http";
 import { getActivePlan } from "@/lib/server/plans";
-import { getActiveWorkout } from "@/lib/server/workouts";
+import { getTodayWorkoutState, getWorkout } from "@/lib/server/workouts";
+import { shanghaiDateKey } from "@/lib/daily-workout-domain";
 
 export async function GET(request: Request): Promise<Response> {
   try {
@@ -39,19 +40,24 @@ export async function POST(request: Request): Promise<Response> {
     if (startedAt > Date.now() + 60_000 || startedAt < Date.now() - 7 * 24 * 60 * 60 * 1000) {
       return jsonError(400, "BAD_REQUEST", "训练开始时间无效");
     }
+    if (shanghaiDateKey(startedAt) !== shanghaiDateKey()) return jsonError(400, "BAD_REQUEST", "只能开始今天的计划训练");
 
     await ensureDatabase();
-    const existing = await getActiveWorkout(user.id);
-    if (existing) return jsonError(409, "CONFLICT", "你还有一场未完成的训练，请先继续或完成它");
+    const existing = await getTodayWorkoutState(user.id);
+    if (existing.status === "completed") return jsonError(409, "TODAY_PLAN_COMPLETED", "今日计划训练已完成");
+    if (existing.status === "in_progress") return jsonOk(existing);
     const plan = await getActivePlan(user.id);
     const day = plan.days.find((item) => item.id === planDayId);
     if (!day || !day.exercises.length) return jsonError(404, "NOT_FOUND", "这一天还没有可执行的训练动作");
     const database = getD1();
+    const now = Date.now();
     const workout = { id: crypto.randomUUID(), planName: day.name, planDayId: day.id, startedAt, completedAt: null, durationSeconds: 0, notes: "" };
     const statements = [database.prepare(
-      `INSERT INTO workout_sessions (id, user_id, plan_name, started_at, completed_at, duration_seconds, notes, plan_id, plan_day_id, plan_version)
-       VALUES (?, ?, ?, ?, NULL, 0, '', ?, ?, ?)`,
-    ).bind(workout.id, user.id, day.name, startedAt, plan.id, day.id, plan.version)];
+      `INSERT INTO workout_sessions
+       (id, user_id, plan_name, started_at, completed_at, duration_seconds, notes, plan_id, plan_day_id, plan_version,
+        workout_type, training_date, finalized_at, synced_plan_version, resumed_at)
+       VALUES (?, ?, ?, ?, NULL, 0, '', ?, ?, ?, 'plan', ?, NULL, ?, ?)`,
+    ).bind(workout.id, user.id, day.name, startedAt, plan.id, day.id, plan.version, shanghaiDateKey(now), plan.version, now)];
     for (const exercise of day.exercises) {
       const useAlternative = selections[exercise.id] === "alternative" && exercise.alternativeName;
       const exerciseId = useAlternative ? exercise.alternativeExerciseId! : exercise.exerciseId;
@@ -67,8 +73,16 @@ export async function POST(request: Request): Promise<Response> {
         exercise.minSets, exercise.maxSets, exercise.minReps, exercise.maxReps, exercise.minDurationSeconds, exercise.maxDurationSeconds, exercise.restSeconds,
         exercise.speedMin, exercise.speedMax, exercise.notes, exercise.alternativeExerciseId, exercise.alternativeName, exercise.alternativeEquipment, exercise.position));
     }
-    await database.batch(statements);
-    return jsonOk({ workout: await getActiveWorkout(user.id, workout.id) }, { status: 201 });
+    try {
+      await database.batch(statements);
+    } catch (error) {
+      const concurrent = await getTodayWorkoutState(user.id);
+      if (concurrent.status !== "not_started") return concurrent.status === "completed"
+        ? jsonError(409, "TODAY_PLAN_COMPLETED", "今日计划训练已完成")
+        : jsonOk(concurrent);
+      throw error;
+    }
+    return jsonOk({ status: "in_progress", workout: await getWorkout(user.id, workout.id) }, { status: 201 });
   } catch (error) {
     return serverError(error);
   }

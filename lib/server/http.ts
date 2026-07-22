@@ -4,6 +4,8 @@ export type ApiErrorCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFLICT"
+  | "TODAY_PLAN_COMPLETED"
+  | "WORKOUT_FINALIZED"
   | "RATE_LIMITED"
   | "INTERNAL_ERROR";
 

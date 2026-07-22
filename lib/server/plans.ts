@@ -208,31 +208,114 @@ export async function replaceActivePlan(userId: string, input: TrainingPlan): Pr
   ).bind(input.id, userId).first<PlanRow>();
   if (!existing || existing.version !== input.version) return null;
 
+  const [dayResult, exerciseResult] = await Promise.all([
+    database.prepare(
+      "SELECT id, weekday FROM training_plan_days WHERE plan_id = ? AND user_id = ?",
+    ).bind(input.id, userId).all<{ id: string; weekday: number }>(),
+    database.prepare(
+      `SELECT training_plan_exercises.id, training_plan_exercises.plan_day_id
+       FROM training_plan_exercises
+       JOIN training_plan_days ON training_plan_days.id = training_plan_exercises.plan_day_id
+       WHERE training_plan_days.plan_id = ? AND training_plan_exercises.user_id = ?`,
+    ).bind(input.id, userId).all<{ id: string; plan_day_id: string }>(),
+  ]);
+  const existingDaysById = new Map(dayResult.results.map((day) => [day.id, day]));
+  const existingDaysByWeekday = new Map(dayResult.results.map((day) => [day.weekday, day]));
+  const existingExerciseIds = new Set(exerciseResult.results.map((exercise) => exercise.id));
+  const inputDayIds = new Set(input.days.map((day) => day.id));
+  const inputExercises = input.days.flatMap((day) => day.exercises.map((exercise) => ({ day, exercise })));
+  const inputExerciseIds = new Set(inputExercises.map(({ exercise }) => exercise.id));
+
+  // 训练日的业务身份绑定星期；普通编辑不允许用新 ID 偷换已有训练日。
+  for (const day of input.days) {
+    const currentDay = existingDaysByWeekday.get(day.weekday);
+    if (currentDay && currentDay.id !== day.id) return null;
+    const currentIdentity = existingDaysById.get(day.id);
+    if (currentIdentity && currentIdentity.weekday !== day.weekday) return null;
+  }
+
+  async function hasForeignIdentity(table: "training_plan_days" | "training_plan_exercises", ids: string[]): Promise<boolean> {
+    for (let offset = 0; offset < ids.length; offset += 50) {
+      const chunk = ids.slice(offset, offset + 50);
+      if (!chunk.length) continue;
+      const placeholders = chunk.map(() => "?").join(", ");
+      const found = await database.prepare(`SELECT id FROM ${table} WHERE id IN (${placeholders}) LIMIT 1`).bind(...chunk).first<{ id: string }>();
+      if (found) return true;
+    }
+    return false;
+  }
+
+  const newDayIds = input.days.filter((day) => !existingDaysById.has(day.id)).map((day) => day.id);
+  const newExerciseIds = inputExercises.filter(({ exercise }) => !existingExerciseIds.has(exercise.id)).map(({ exercise }) => exercise.id);
+  if (await hasForeignIdentity("training_plan_days", newDayIds) || await hasForeignIdentity("training_plan_exercises", newExerciseIds)) return null;
+
   const now = Date.now();
   const nextVersion = existing.version + 1;
-  const statements = [
-    database.prepare("UPDATE training_plans SET name = ?, version = ?, updated_at = ? WHERE id = ? AND user_id = ? AND version = ?")
-      .bind(input.name, nextVersion, now, input.id, userId, existing.version),
-    database.prepare("DELETE FROM training_plan_days WHERE plan_id = ? AND user_id = ?").bind(input.id, userId),
-  ];
+  const statements: D1PreparedStatement[] = [];
   for (const [dayIndex, day] of input.days.entries()) {
-    const dayId = crypto.randomUUID();
-    statements.push(database.prepare(
-      "INSERT INTO training_plan_days (id, plan_id, user_id, weekday, name, focus, enabled, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    ).bind(dayId, input.id, userId, day.weekday, day.name, day.focus, day.enabled ? 1 : 0, dayIndex));
-    for (const [exerciseIndex, exercise] of day.exercises.entries()) {
+    const dayId = day.id;
+    if (existingDaysById.has(dayId)) {
       statements.push(database.prepare(
-        `INSERT INTO training_plan_exercises
-         (id, plan_day_id, user_id, exercise_id, name, equipment, muscle_group, tracking_type, weight_mode,
-          min_sets, max_sets, min_reps, max_reps, min_duration_seconds, max_duration_seconds, rest_seconds,
-          speed_min, speed_max, notes, alternative_exercise_id, alternative_name, alternative_equipment, position)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(crypto.randomUUID(), dayId, userId, exercise.exerciseId, exercise.name, exercise.equipment, exercise.muscleGroup, exercise.trackingType, exercise.weightMode,
-        exercise.minSets, exercise.maxSets, exercise.minReps, exercise.maxReps, exercise.minDurationSeconds, exercise.maxDurationSeconds, exercise.restSeconds,
-        exercise.speedMin, exercise.speedMax, exercise.notes, exercise.alternativeExerciseId, exercise.alternativeName, exercise.alternativeEquipment, exerciseIndex));
+        `UPDATE training_plan_days SET name = ?, focus = ?, enabled = ?, position = ?
+         WHERE id = ? AND plan_id = ? AND user_id = ?
+           AND EXISTS (SELECT 1 FROM training_plans WHERE id = ? AND user_id = ? AND version = ?)`,
+      ).bind(day.name, day.focus, day.enabled ? 1 : 0, dayIndex, dayId, input.id, userId, input.id, userId, existing.version));
+    } else {
+      statements.push(database.prepare(
+        `INSERT INTO training_plan_days (id, plan_id, user_id, weekday, name, focus, enabled, position)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (SELECT 1 FROM training_plans WHERE id = ? AND user_id = ? AND version = ?)`,
+      ).bind(dayId, input.id, userId, day.weekday, day.name, day.focus, day.enabled ? 1 : 0, dayIndex, input.id, userId, existing.version));
+    }
+    for (const [exerciseIndex, exercise] of day.exercises.entries()) {
+      if (existingExerciseIds.has(exercise.id)) {
+        statements.push(database.prepare(
+          `UPDATE training_plan_exercises SET plan_day_id = ?, exercise_id = ?, name = ?, equipment = ?, muscle_group = ?, tracking_type = ?, weight_mode = ?,
+           min_sets = ?, max_sets = ?, min_reps = ?, max_reps = ?, min_duration_seconds = ?, max_duration_seconds = ?, rest_seconds = ?,
+           speed_min = ?, speed_max = ?, notes = ?, alternative_exercise_id = ?, alternative_name = ?, alternative_equipment = ?, position = ?
+           WHERE id = ? AND user_id = ?
+             AND EXISTS (SELECT 1 FROM training_plans WHERE id = ? AND user_id = ? AND version = ?)`,
+        ).bind(dayId, exercise.exerciseId, exercise.name, exercise.equipment, exercise.muscleGroup, exercise.trackingType, exercise.weightMode,
+          exercise.minSets, exercise.maxSets, exercise.minReps, exercise.maxReps, exercise.minDurationSeconds, exercise.maxDurationSeconds, exercise.restSeconds,
+          exercise.speedMin, exercise.speedMax, exercise.notes, exercise.alternativeExerciseId, exercise.alternativeName, exercise.alternativeEquipment, exerciseIndex,
+          exercise.id, userId, input.id, userId, existing.version));
+      } else {
+        statements.push(database.prepare(
+          `INSERT INTO training_plan_exercises
+           (id, plan_day_id, user_id, exercise_id, name, equipment, muscle_group, tracking_type, weight_mode,
+            min_sets, max_sets, min_reps, max_reps, min_duration_seconds, max_duration_seconds, rest_seconds,
+            speed_min, speed_max, notes, alternative_exercise_id, alternative_name, alternative_equipment, position)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+           WHERE EXISTS (SELECT 1 FROM training_plans WHERE id = ? AND user_id = ? AND version = ?)`,
+        ).bind(exercise.id, dayId, userId, exercise.exerciseId, exercise.name, exercise.equipment, exercise.muscleGroup, exercise.trackingType, exercise.weightMode,
+          exercise.minSets, exercise.maxSets, exercise.minReps, exercise.maxReps, exercise.minDurationSeconds, exercise.maxDurationSeconds, exercise.restSeconds,
+          exercise.speedMin, exercise.speedMax, exercise.notes, exercise.alternativeExerciseId, exercise.alternativeName, exercise.alternativeEquipment, exerciseIndex,
+          input.id, userId, existing.version));
+      }
     }
   }
-  await database.batch(statements);
+  for (const exercise of exerciseResult.results) {
+    if (!inputExerciseIds.has(exercise.id)) {
+      statements.push(database.prepare(
+        `DELETE FROM training_plan_exercises WHERE id = ? AND user_id = ?
+         AND EXISTS (SELECT 1 FROM training_plans WHERE id = ? AND user_id = ? AND version = ?)`,
+      ).bind(exercise.id, userId, input.id, userId, existing.version));
+    }
+  }
+  for (const day of dayResult.results) {
+    if (!inputDayIds.has(day.id)) {
+      statements.push(database.prepare(
+        `DELETE FROM training_plan_days WHERE id = ? AND plan_id = ? AND user_id = ?
+         AND EXISTS (SELECT 1 FROM training_plans WHERE id = ? AND user_id = ? AND version = ?)`,
+      ).bind(day.id, input.id, userId, input.id, userId, existing.version));
+    }
+  }
+  statements.push(database.prepare(
+    "UPDATE training_plans SET name = ?, version = ?, updated_at = ? WHERE id = ? AND user_id = ? AND version = ?",
+  ).bind(input.name, nextVersion, now, input.id, userId, existing.version));
+  const results = await database.batch(statements);
+  const planUpdate = results.at(-1);
+  if (!planUpdate?.success || Number(planUpdate.meta?.changes ?? 0) !== 1) return null;
   return readPlan(userId, { id: input.id, name: input.name, version: nextVersion, updated_at: now });
 }
 

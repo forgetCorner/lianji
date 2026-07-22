@@ -1,6 +1,7 @@
 import { ensureDatabase, getD1 } from "@/db";
 import type { AuthUser } from "@/lib/server/auth";
 import { getActivePlan, shanghaiWeekday } from "@/lib/server/plans";
+import { finalizeExpiredPlanWorkouts } from "@/lib/server/workouts";
 
 type SessionRow = {
   id: string;
@@ -103,6 +104,7 @@ function buildLeaderboard(users: UserRow[], sets: SetRow[], now: number, current
 
 export async function buildDashboard(user: AuthUser) {
   await ensureDatabase();
+  await finalizeExpiredPlanWorkouts(user.id);
   const database = getD1();
   const plan = await getActivePlan(user.id);
   const now = Date.now();
@@ -158,7 +160,7 @@ export async function buildDashboard(user: AuthUser) {
     },
     lastSession: completedSessions[0] ?? null,
     activity: [...activity.entries()].map(([date, count]) => ({ date, count })),
-    recentWorkouts: sessions.slice(0, 20),
+    recentWorkouts: completedSessions.slice(0, 20),
     trend: {
       exerciseId: trendExercise,
       exerciseName: trendName,

@@ -66,6 +66,7 @@ export type WorkoutExercise = PlanExercise & {
   selectedEquipment: string;
   skipped: boolean;
   completedAt: number | null;
+  removedFromPlanAt: number | null;
   sets: WorkoutSet[];
   lastWeightKg: number;
   lastLeftWeightKg: number | null;
@@ -77,7 +78,18 @@ export type ActiveWorkout = {
   planName: string;
   planDayId: string | null;
   startedAt: number;
+  completedAt: number | null;
+  trainingDate: string | null;
+  finalizedAt: number | null;
+  durationSeconds: number;
+  resumedAt: number | null;
+  syncedPlanVersion: number | null;
   exercises: WorkoutExercise[];
+};
+
+export type TodayWorkoutState = {
+  status: "not_started" | "in_progress" | "completed";
+  workout: ActiveWorkout | null;
 };
 
 export const weekdays = [

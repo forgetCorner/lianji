@@ -43,7 +43,15 @@ const schemaStatements = [
     started_at INTEGER NOT NULL,
     completed_at INTEGER,
     duration_seconds INTEGER DEFAULT 0 NOT NULL,
-    notes TEXT DEFAULT '' NOT NULL
+    notes TEXT DEFAULT '' NOT NULL,
+    plan_id TEXT,
+    plan_day_id TEXT,
+    plan_version INTEGER,
+    workout_type TEXT DEFAULT 'plan' NOT NULL,
+    training_date TEXT,
+    finalized_at INTEGER,
+    synced_plan_version INTEGER,
+    resumed_at INTEGER
   )`,
   "CREATE INDEX IF NOT EXISTS workout_sessions_user_started_idx ON workout_sessions (user_id, started_at)",
   `CREATE TABLE IF NOT EXISTS workout_sets (
@@ -145,9 +153,11 @@ const schemaStatements = [
     alternative_equipment TEXT,
     position INTEGER NOT NULL,
     skipped INTEGER DEFAULT 0 NOT NULL,
-    completed_at INTEGER
+    completed_at INTEGER,
+    removed_from_plan_at INTEGER
   )`,
-  "CREATE UNIQUE INDEX IF NOT EXISTS workout_exercises_session_position_unique ON workout_exercises (workout_session_id, position)",
+  "CREATE INDEX IF NOT EXISTS workout_exercises_session_position_idx ON workout_exercises (workout_session_id, position)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS workout_exercises_session_plan_unique ON workout_exercises (workout_session_id, plan_exercise_id) WHERE plan_exercise_id IS NOT NULL",
   "CREATE INDEX IF NOT EXISTS workout_exercises_user_session_idx ON workout_exercises (user_id, workout_session_id)",
 ] as const;
 
@@ -173,23 +183,63 @@ export async function ensureDatabase(): Promise<void> {
 
       const sessionColumns = await database.prepare("PRAGMA table_info(workout_sessions)").all<{ name: string }>();
       const setColumns = await database.prepare("PRAGMA table_info(workout_sets)").all<{ name: string }>();
+      const exerciseColumns = await database.prepare("PRAGMA table_info(workout_exercises)").all<{ name: string }>();
       const sessionColumnNames = new Set(sessionColumns.results.map((column) => column.name));
       const setColumnNames = new Set(setColumns.results.map((column) => column.name));
+      const exerciseColumnNames = new Set(exerciseColumns.results.map((column) => column.name));
       const additions: D1PreparedStatement[] = [];
 
       if (!sessionColumnNames.has("plan_id")) additions.push(database.prepare("ALTER TABLE workout_sessions ADD COLUMN plan_id TEXT"));
       if (!sessionColumnNames.has("plan_day_id")) additions.push(database.prepare("ALTER TABLE workout_sessions ADD COLUMN plan_day_id TEXT"));
       if (!sessionColumnNames.has("plan_version")) additions.push(database.prepare("ALTER TABLE workout_sessions ADD COLUMN plan_version INTEGER"));
+      if (!sessionColumnNames.has("workout_type")) additions.push(database.prepare("ALTER TABLE workout_sessions ADD COLUMN workout_type TEXT DEFAULT 'plan' NOT NULL"));
+      if (!sessionColumnNames.has("training_date")) additions.push(database.prepare("ALTER TABLE workout_sessions ADD COLUMN training_date TEXT"));
+      if (!sessionColumnNames.has("finalized_at")) additions.push(database.prepare("ALTER TABLE workout_sessions ADD COLUMN finalized_at INTEGER"));
+      if (!sessionColumnNames.has("synced_plan_version")) additions.push(database.prepare("ALTER TABLE workout_sessions ADD COLUMN synced_plan_version INTEGER"));
+      if (!sessionColumnNames.has("resumed_at")) additions.push(database.prepare("ALTER TABLE workout_sessions ADD COLUMN resumed_at INTEGER"));
       if (!setColumnNames.has("workout_exercise_id")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN workout_exercise_id TEXT"));
       if (!setColumnNames.has("tracking_type")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN tracking_type TEXT DEFAULT 'weight_reps' NOT NULL"));
       if (!setColumnNames.has("duration_seconds")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN duration_seconds INTEGER DEFAULT 0 NOT NULL"));
       if (!setColumnNames.has("left_weight_kg")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN left_weight_kg REAL"));
       if (!setColumnNames.has("right_weight_kg")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN right_weight_kg REAL"));
       if (!setColumnNames.has("effort")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN effort INTEGER"));
+      if (!exerciseColumnNames.has("removed_from_plan_at")) additions.push(database.prepare("ALTER TABLE workout_exercises ADD COLUMN removed_from_plan_at INTEGER"));
       if (additions.length) await database.batch(additions);
       await database.batch([
+        database.prepare(`UPDATE workout_sessions AS candidate
+          SET workout_type = 'legacy', finalized_at = COALESCE(candidate.completed_at, candidate.started_at), resumed_at = NULL
+          WHERE candidate.completed_at IS NULL AND candidate.training_date IS NULL
+            AND candidate.id <> (
+              SELECT latest.id FROM workout_sessions AS latest
+              WHERE latest.user_id = candidate.user_id AND latest.completed_at IS NULL AND latest.training_date IS NULL
+                AND strftime('%Y-%m-%d', latest.started_at / 1000, 'unixepoch', '+8 hours') = strftime('%Y-%m-%d', candidate.started_at / 1000, 'unixepoch', '+8 hours')
+              ORDER BY latest.started_at DESC, latest.id DESC LIMIT 1
+            )`),
+        database.prepare("UPDATE workout_sessions SET training_date = strftime('%Y-%m-%d', started_at / 1000, 'unixepoch', '+8 hours'), resumed_at = COALESCE(resumed_at, started_at), synced_plan_version = COALESCE(synced_plan_version, plan_version) WHERE completed_at IS NULL AND training_date IS NULL AND workout_type = 'plan'"),
+        database.prepare(`UPDATE workout_sessions AS candidate
+          SET training_date = strftime('%Y-%m-%d', candidate.started_at / 1000, 'unixepoch', '+8 hours'),
+              finalized_at = NULL,
+              synced_plan_version = COALESCE(candidate.synced_plan_version, candidate.plan_version)
+          WHERE candidate.completed_at IS NOT NULL AND candidate.training_date IS NULL AND candidate.plan_id IS NOT NULL
+            AND strftime('%Y-%m-%d', candidate.started_at / 1000, 'unixepoch', '+8 hours') = strftime('%Y-%m-%d', 'now', '+8 hours')
+            AND candidate.started_at = (
+              SELECT MAX(latest.started_at) FROM workout_sessions AS latest
+              WHERE latest.user_id = candidate.user_id AND latest.completed_at IS NOT NULL AND latest.training_date IS NULL
+                AND latest.plan_id IS NOT NULL
+                AND strftime('%Y-%m-%d', latest.started_at / 1000, 'unixepoch', '+8 hours') = strftime('%Y-%m-%d', 'now', '+8 hours')
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM workout_sessions AS current
+              WHERE current.user_id = candidate.user_id AND current.training_date = strftime('%Y-%m-%d', 'now', '+8 hours')
+                AND current.workout_type = 'plan'
+            )`),
+        database.prepare("UPDATE workout_sessions SET finalized_at = completed_at WHERE completed_at IS NOT NULL AND finalized_at IS NULL AND training_date IS NULL"),
         database.prepare("DROP INDEX IF EXISTS workout_sets_session_exercise_set_unique"),
         database.prepare("CREATE UNIQUE INDEX IF NOT EXISTS workout_sets_workout_exercise_set_unique ON workout_sets (workout_exercise_id, set_index)"),
+        database.prepare("DROP INDEX IF EXISTS workout_exercises_session_position_unique"),
+        database.prepare("CREATE INDEX IF NOT EXISTS workout_exercises_session_position_idx ON workout_exercises (workout_session_id, position)"),
+        database.prepare("CREATE UNIQUE INDEX IF NOT EXISTS workout_exercises_session_plan_unique ON workout_exercises (workout_session_id, plan_exercise_id) WHERE plan_exercise_id IS NOT NULL"),
+        database.prepare("CREATE UNIQUE INDEX IF NOT EXISTS workout_sessions_user_plan_date_unique ON workout_sessions (user_id, training_date, workout_type) WHERE training_date IS NOT NULL AND workout_type = 'plan'"),
       ]);
     })();
   }

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable(
@@ -62,8 +63,18 @@ export const workoutSessions = sqliteTable(
     planId: text("plan_id"),
     planDayId: text("plan_day_id"),
     planVersion: integer("plan_version"),
+    workoutType: text("workout_type").notNull().default("plan"),
+    trainingDate: text("training_date"),
+    finalizedAt: integer("finalized_at"),
+    syncedPlanVersion: integer("synced_plan_version"),
+    resumedAt: integer("resumed_at"),
   },
-  (table) => [index("workout_sessions_user_started_idx").on(table.userId, table.startedAt)],
+  (table) => [
+    index("workout_sessions_user_started_idx").on(table.userId, table.startedAt),
+    uniqueIndex("workout_sessions_user_plan_date_unique")
+      .on(table.userId, table.trainingDate, table.workoutType)
+      .where(sql`${table.trainingDate} IS NOT NULL AND ${table.workoutType} = 'plan'`),
+  ],
 );
 
 export const workoutSets = sqliteTable(
@@ -199,9 +210,13 @@ export const workoutExercises = sqliteTable(
     position: integer("position").notNull(),
     skipped: integer("skipped").notNull().default(0),
     completedAt: integer("completed_at"),
+    removedFromPlanAt: integer("removed_from_plan_at"),
   },
   (table) => [
-    uniqueIndex("workout_exercises_session_position_unique").on(table.workoutSessionId, table.position),
+    index("workout_exercises_session_position_idx").on(table.workoutSessionId, table.position),
+    uniqueIndex("workout_exercises_session_plan_unique")
+      .on(table.workoutSessionId, table.planExerciseId)
+      .where(sql`${table.planExerciseId} IS NOT NULL`),
     index("workout_exercises_user_session_idx").on(table.userId, table.workoutSessionId),
   ],
 );

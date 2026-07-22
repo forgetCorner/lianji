@@ -1,7 +1,8 @@
 import { ensureDatabase, getD1 } from "@/db";
 import { getSessionUser } from "@/lib/server/auth";
 import { jsonError, jsonOk, readJsonObject, serverError, validateMutationRequest } from "@/lib/server/http";
-import { getActiveWorkout } from "@/lib/server/workouts";
+import { getWorkout } from "@/lib/server/workouts";
+import { shanghaiDateKey } from "@/lib/daily-workout-domain";
 import type { TrackingType, WeightMode } from "@/lib/training";
 
 type ExerciseRow = {
@@ -35,13 +36,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     await ensureDatabase();
     const database = getD1();
+    const session = await database.prepare(
+      "SELECT completed_at, training_date, finalized_at FROM workout_sessions WHERE id = ? AND user_id = ? AND workout_type = 'plan'",
+    ).bind(workoutId, user.id).first<{ completed_at: number | null; training_date: string | null; finalized_at: number | null }>();
+    if (!session) return jsonError(404, "NOT_FOUND", "当前训练不存在");
+    if (session.finalized_at || session.training_date !== shanghaiDateKey()) return jsonError(409, "WORKOUT_FINALIZED", "这条训练已跨日冻结");
+    if (session.completed_at) return jsonError(409, "CONFLICT", "今日训练已完成");
     const exercise = await database.prepare(
       `SELECT workout_exercises.id, workout_exercises.exercise_id, workout_exercises.name, workout_exercises.muscle_group,
         workout_exercises.tracking_type, workout_exercises.weight_mode, workout_exercises.max_sets, workout_exercises.completed_at
        FROM workout_exercises JOIN workout_sessions ON workout_sessions.id = workout_exercises.workout_session_id
        WHERE workout_exercises.id = ? AND workout_exercises.workout_session_id = ? AND workout_exercises.user_id = ?
-         AND workout_sessions.completed_at IS NULL`,
-    ).bind(workoutExerciseId, workoutId, user.id).first<ExerciseRow>();
+         AND workout_sessions.completed_at IS NULL AND workout_sessions.finalized_at IS NULL
+         AND workout_sessions.training_date = ? AND workout_exercises.removed_from_plan_at IS NULL`,
+    ).bind(workoutExerciseId, workoutId, user.id, shanghaiDateKey()).first<ExerciseRow>();
     if (!exercise) return jsonError(404, "NOT_FOUND", "当前训练动作不存在");
     if (exercise.completed_at) return jsonError(409, "CONFLICT", "这个动作已经完成");
     if (setIndex > exercise.max_sets) return jsonError(400, "BAD_REQUEST", "训练组数超出计划范围");
@@ -68,7 +76,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
        left_weight_kg = excluded.left_weight_kg, right_weight_kg = excluded.right_weight_kg, effort = excluded.effort`,
     ).bind(setId, workoutId, user.id, exercise.exercise_id, exercise.name, exercise.muscle_group, setIndex, weightKg, reps, completedAt,
       workoutExerciseId, exercise.tracking_type, durationSeconds, leftWeightKg, rightWeightKg, effort).run();
-    return jsonOk({ workout: await getActiveWorkout(user.id, workoutId) }, { status: 201 });
+    return jsonOk({ workout: await getWorkout(user.id, workoutId) }, { status: 201 });
   } catch (error) {
     return serverError(error);
   }
