@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { exerciseLibrary, targetLabel, weekdays } from "@/lib/training";
 import type { ExerciseDefinition, PlanExercise, TrackingType, TrainingDay, TrainingPlan, WeightMode } from "@/lib/training";
 import { KineticIcon } from "@/components/kinetic-icons";
+import { ExercisePicker, TrackSelect } from "@/components/track-select";
 
 type Props = {
   plan: TrainingPlan;
@@ -13,6 +14,18 @@ type Props = {
   error: string | null;
   onSave: (plan: TrainingPlan) => Promise<void>;
 };
+
+const trackingOptions: Array<{ value: TrackingType; label: string }> = [
+  { value: "weight_reps", label: "重量 × 次数" },
+  { value: "bodyweight_reps", label: "徒手次数" },
+  { value: "duration", label: "计时" },
+  { value: "bodyweight_duration", label: "徒手计时" },
+];
+
+const weightOptions: Array<{ value: WeightMode; label: string }> = [
+  { value: "total", label: "总重量" },
+  { value: "per_side", label: "左右单侧" },
+];
 
 function newExercise(definition?: ExerciseDefinition): PlanExercise {
   const source = definition ?? { exerciseId: `custom-${crypto.randomUUID()}`, name: "自定义动作", equipment: "", muscleGroup: "", trackingType: "weight_reps" as const, weightMode: "total" as const };
@@ -114,14 +127,14 @@ export function TrainingPlanView({ plan, saving, error, onSave }: Props) {
                   <div className="exercise-editor-index"><b>{String(index + 1).padStart(2, "0")}</b><span>{targetLabel(exercise)}</span></div>
                   <div className="exercise-editor-body">
                     <div className="exercise-name-row">
-                      <select aria-label="从动作库选择" value={exerciseLibrary.some((item) => item.exerciseId === exercise.exerciseId) ? exercise.exerciseId : "custom"} onChange={(event) => { const definition = exerciseLibrary.find((item) => item.exerciseId === event.target.value); if (definition) chooseDefinition(exercise, definition); }}><option value="custom">自定义动作</option>{exerciseLibrary.map((item) => <option key={item.exerciseId} value={item.exerciseId}>{item.name}</option>)}</select>
+                      <ExercisePicker ariaLabel="从动作库选择" value={exerciseLibrary.some((item) => item.exerciseId === exercise.exerciseId) ? exercise.exerciseId : "custom"} displayValue={exercise.name} options={exerciseLibrary} onSelect={(exerciseId) => { const definition = exerciseLibrary.find((item) => item.exerciseId === exerciseId); if (definition) chooseDefinition(exercise, definition); }} onCreateCustom={() => updateExercise(exercise.id, { exerciseId: `custom-${crypto.randomUUID()}`, name: "自定义动作", equipment: "", muscleGroup: "" })} />
                       <input aria-label="动作名称" value={exercise.name} onChange={(event) => updateExercise(exercise.id, { name: event.target.value, exerciseId: exercise.exerciseId.startsWith("custom-") ? exercise.exerciseId : `custom-${crypto.randomUUID()}` })} />
                     </div>
                     <div className="exercise-meta-grid">
                       <label>器械<input value={exercise.equipment} onChange={(event) => updateExercise(exercise.id, { equipment: event.target.value })} /></label>
                       <label>肌群<input value={exercise.muscleGroup} onChange={(event) => updateExercise(exercise.id, { muscleGroup: event.target.value })} /></label>
-                      <label>记录方式<select value={exercise.trackingType} onChange={(event) => { const trackingType = event.target.value as TrackingType; updateExercise(exercise.id, { trackingType, weightMode: trackingType === "weight_reps" ? exercise.weightMode === "none" ? "total" : exercise.weightMode : "none" }); }}><option value="weight_reps">重量 × 次数</option><option value="bodyweight_reps">徒手次数</option><option value="duration">计时</option><option value="bodyweight_duration">徒手计时</option></select></label>
-                      {exercise.trackingType === "weight_reps" && <label>重量方式<select value={exercise.weightMode} onChange={(event) => updateExercise(exercise.id, { weightMode: event.target.value as WeightMode })}><option value="total">总重量</option><option value="per_side">左右单侧</option></select></label>}
+                      <div className="field-control"><span>记录方式</span><TrackSelect ariaLabel="记录方式" value={exercise.trackingType} options={trackingOptions} onChange={(trackingType) => updateExercise(exercise.id, { trackingType, weightMode: trackingType === "weight_reps" ? exercise.weightMode === "none" ? "total" : exercise.weightMode : "none" })} /></div>
+                      {exercise.trackingType === "weight_reps" && <div className="field-control"><span>重量方式</span><TrackSelect ariaLabel="重量方式" value={exercise.weightMode} options={weightOptions} onChange={(weightMode) => updateExercise(exercise.id, { weightMode })} /></div>}
                     </div>
                     <div className="target-editor">
                       <label>最少组<input type="number" min="1" max="12" value={exercise.minSets} onChange={(event) => updateExercise(exercise.id, { minSets: Number(event.target.value), maxSets: Math.max(Number(event.target.value), exercise.maxSets) })} /></label>
@@ -138,7 +151,7 @@ export function TrainingPlanView({ plan, saving, error, onSave }: Props) {
             }) : <motion.div className="plan-empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><KineticIcon kind="plan" size={34} /><strong>这一天还没有动作</strong><p>开启训练日后，从动作库添加第一项。</p></motion.div>}</AnimatePresence>
           </div>
 
-          <div className="add-exercise-bar"><select aria-label="选择要添加的动作" value={librarySelection} onChange={(event) => setLibrarySelection(event.target.value)}>{exerciseLibrary.map((exercise) => <option key={exercise.exerciseId} value={exercise.exerciseId}>{exercise.name} · {exercise.equipment}</option>)}</select><button className="secondary-action" onClick={addExercise}><Plus size={17} />添加动作</button><button className="text-action" onClick={addCustomExercise}>新建自定义动作</button></div>
+          <div className="add-exercise-bar"><ExercisePicker ariaLabel="选择要添加的动作" value={librarySelection} options={exerciseLibrary} onSelect={setLibrarySelection} onCreateCustom={addCustomExercise} /><button className="secondary-action" onClick={addExercise}><Plus size={17} />添加动作</button><button className="text-action" onClick={addCustomExercise}>新建自定义动作</button></div>
           {error && <p className="inline-error" role="alert">{error}</p>}
           <div className="plan-save-bar"><span>{hasEmptyTrainingDay ? "训练日至少需要一个动作" : dirty ? "有尚未同步的修改" : `已同步 · 版本 ${draft.version}`}</span><button className="primary-action" disabled={!dirty || saving || hasEmptyTrainingDay} onClick={save}><KineticIcon kind="save" active={dirty} size={19} />{saving ? "正在保存…" : "保存周计划"}</button></div>
         </motion.div>

@@ -5,7 +5,6 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
-  CircleUserRound,
   History,
   Play,
   Settings,
@@ -13,7 +12,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -350,10 +349,10 @@ function ProfileView({ dashboard, onAccount }: { dashboard: DashboardData; onAcc
         <div className="heatmap-row"><div className="heatmap-panel"><Heatmap activity={dashboard.activity} period={period} syncedAt={dashboard.syncedAt} /><div className="heatmap-legend"><span>少</span><i data-level="0" /><i data-level="1" /><i data-level="2" /><i data-level="3" /><span>多</span></div></div><div className="frequency-stats"><div className="frequency-total"><strong>{selectedWorkouts}</strong><span>次训练</span><small>{periodConfig.label}范围</small></div><div className="frequency-meta"><span><b>{activeWeeks}</b>活跃周</span><span><b className="orange">{dashboard.summary.streak}</b>当前连续</span></div></div></div>
       </section>
       <div className="profile-progress-columns">
-        <section className="timeline"><div className="section-heading"><h2>近期训练</h2><span>真实记录</span></div>{dashboard.recentWorkouts.length ? dashboard.recentWorkouts.map((session, index) => { const date = new Date(session.started_at); return <div className={`session ${["lime", "orange", "blue"][index % 3]}`} key={session.id}><i /><time><strong>{String(date.getDate()).padStart(2, "0")}</strong><small>{date.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</small></time><div><h3>{session.plan_name}</h3><p>{session.set_count} 组 · {formatDuration(session.duration_seconds)}</p><b>{formatNumber(session.volume_kg)} kg</b></div></div>; }) : <div className="data-empty"><History size={26} /><strong>还没有训练记录</strong><p>完成第一组后，这里会形成你的训练时间线。</p></div>}<footer><span>累计 {dashboard.summary.totalWorkouts} 次训练</span><b>云端同步</b></footer></section>
+        <section className="timeline"><div className="section-heading"><h2>近期训练</h2><span>真实记录</span></div>{dashboard.recentWorkouts.length ? dashboard.recentWorkouts.map((session, index) => { const date = new Date(session.started_at); return <div className={`session ${["lime", "orange", "blue"][index % 3]}`} key={session.id}><i /><time><strong>{String(date.getDate()).padStart(2, "0")}</strong><small>{date.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</small></time><div><h3>{session.plan_name}</h3><p>{session.set_count} 组 · {formatDuration(session.duration_seconds)}</p><b>{formatNumber(session.volume_kg)} kg</b></div></div>; }) : <div className="data-empty"><History size={26} /><strong>还没有训练记录</strong><p>完成第一组后，这里会形成你的训练时间线。</p></div>}<footer><span>累计 {dashboard.summary.totalWorkouts} 次训练</span><i aria-hidden="true" /><b>已云端同步</b></footer></section>
         <section className="trend">
           <div className="section-heading"><h2>力量趋势</h2><button>{dashboard.trend.exerciseName || "等待记录"} <ChevronDown size={14} /></button></div>
-          <div className="trend-stats"><div><span>当前估算 1RM</span><strong>{currentStrength ? formatNumber(currentStrength) : "--"} <em>kg</em></strong></div><div><b>{trendData.length}</b><span>有效记录点</span></div><div><b className="orange">真实</b><span>训练组数据</span></div></div>
+          <div className="trend-stats"><div><strong>{currentStrength ? formatNumber(currentStrength) : "--"} <em>kg</em></strong><span>当前估算 1RM</span></div><div><strong>{trendData.length}</strong><span>有效记录点</span></div><div><strong className="orange">真实</strong><span>训练组数据</span></div></div>
           <div className="chart-wrap">{trendData.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={trendData} margin={{ top: 12, right: 16, left: -20, bottom: 0 }}><CartesianGrid stroke="#29302c" vertical={false} /><XAxis dataKey="date" stroke="#66706b" tickLine={false} axisLine={false} fontSize={10} interval="preserveStartEnd" /><YAxis domain={["dataMin - 5", "dataMax + 5"]} stroke="#66706b" tickLine={false} axisLine={false} fontSize={10} /><Tooltip contentStyle={{ background: "#121613", border: "1px solid #303733", borderRadius: 4 }} /><Line type="monotone" dataKey="value" stroke="#c0fa4a" strokeWidth={3} dot={{ r: 3, fill: "#c0fa4a", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#ff9138" }} isAnimationActive={false} /></LineChart></ResponsiveContainer> : <div className="data-empty chart-empty"><Activity size={26} /><strong>等待力量轨迹</strong><p>记录同一动作的重量与次数后自动生成。</p></div>}</div>
           <p className="chart-note">基于每组重量与次数估算，减少体重和初始力量差异影响</p>
         </section>
@@ -382,8 +381,10 @@ function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const me = dashboard?.leaderboard.find((entry) => entry.isCurrentUser);
   const joinedDays = user ? Math.max(1, Math.floor(((dashboard?.syncedAt ?? user.createdAt) - user.createdAt) / (24 * 60 * 60 * 1000)) + 1) : 0;
+  const profileInitials = user?.displayName.slice(0, 2).toUpperCase() ?? "";
 
   async function submitAccount(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -432,18 +433,30 @@ function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut 
     }
   }
 
+  async function copyInvite() {
+    if (!inviteCode) return;
+    try {
+      await navigator.clipboard.writeText(inviteCode);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setError("复制失败，请手动复制邀请码");
+    }
+  }
+
   return (
-    <div className={`modal-backdrop ${user ? "profile-backdrop" : ""}`} role="presentation" onMouseDown={(event) => user && event.target === event.currentTarget && onClose()}>
+    <div className={`modal-backdrop ${user ? "profile-backdrop" : ""}`} role="presentation" onClick={(event) => user && event.target === event.currentTarget && onClose()}>
       <div className={`account-dialog ${user ? "profile-drawer" : ""}`} role="dialog" aria-modal="true" aria-label={user ? "个人档案与账号设置" : registering ? "注册练迹账号" : "登录练迹"}>
         {user && <button className="dialog-close" onClick={onClose} aria-label="关闭"><X /></button>}
         {!user && <Brand />}
         {user ? <div className="account-panel">
-          <div className="profile-drawer-header"><CircleUserRound size={58} /><div><span>PERSONAL PROFILE</span><h2>{user.displayName}</h2><p>@{user.username} · 加入练迹 {joinedDays} 天</p></div></div>
+          <div className="profile-sheet-handle" aria-hidden="true" />
+          <div className="profile-drawer-header"><span className="profile-avatar" aria-hidden="true">{profileInitials}</span><div><h2>{user.displayName}</h2><p>@{user.username} · 加入练迹 {joinedDays} 天</p></div></div>
           <div className="profile-drawer-stats"><div><strong>{dashboard?.summary.totalWorkouts ?? "--"}</strong><span>累计训练</span></div><div><strong>{dashboard?.summary.streak ?? "--"}</strong><span>当前连续</span></div><div><strong>{me?.stability ?? "--"}</strong><span>稳定性</span></div></div>
-          <div className="profile-sync-line"><i /><span>训练数据已通过账号同步</span><b>{dashboard ? "已同步" : "同步中"}</b></div>
+          <div className={`profile-sync-line ${dashboard ? "is-synced" : "is-syncing"}`} role="status"><i /><span>{dashboard ? "训练数据已同步" : "正在同步训练数据"}</span><b>{dashboard ? "已同步" : "同步中"}</b></div>
           <div className="invite-generator">
-            <span>好友邀请码</span>
-            {inviteCode ? <><strong>{inviteCode}</strong><small>7 天内可使用 1 次，原始码仅在这里显示。</small><button className="secondary-action" onClick={() => navigator.clipboard?.writeText(inviteCode)}>复制邀请码</button></> : <button className="primary-action" onClick={createInvite} disabled={submitting}>{submitting ? "正在创建…" : "生成一次性邀请码"}</button>}
+            <div><strong>邀请朋友加入</strong><span>邀请码 7 天内可使用 1 次</span></div>
+            {inviteCode ? <div className="invite-result"><code>{inviteCode}</code><button className="secondary-action" onClick={copyInvite}>{copied ? "已复制" : "复制邀请码"}</button><small>原始邀请码仅在这里显示，请及时发送给朋友。</small></div> : <button className="primary-action" onClick={createInvite} disabled={submitting}>{submitting ? "正在创建…" : "生成一次性邀请码"}</button>}
           </div>
           {error && <p className="form-error" role="alert">{error}</p>}
           <button className="text-action logout-action" onClick={logout} disabled={submitting}>退出当前账号</button>
@@ -466,6 +479,7 @@ function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut 
 }
 
 export default function Home() {
+  const appContentRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>("today");
   const [user, setUser] = useState<AuthUser | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -521,6 +535,11 @@ export default function Home() {
     const timer = window.setTimeout(() => setNotice(null), 3200);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    appContentRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [view]);
 
   async function startWorkout(dayId: string, selections: Record<string, "primary" | "alternative"> = {}) {
     if (!dashboard) return;
@@ -663,16 +682,17 @@ export default function Home() {
     : view === "workout" && activeWorkout && currentWorkoutExercise ? <ActiveWorkoutView key={currentWorkoutExercise.id} workout={activeWorkout} exercise={currentWorkoutExercise} onBack={() => setView("today")} onSaveSet={saveSet} onSkip={() => finishExercise(currentWorkoutExercise.id, true)} saving={saving} error={workoutError} />
     : view === "ranking" ? <RankingView entries={dashboard.leaderboard} />
     : <ProfileView dashboard={dashboard} onAccount={() => setAccountOpen(true)} />;
+  const showMobileNav = view !== "workout" && Boolean(user);
 
   return (
     <main className={`app-shell ${brandLanded ? "boot-arrived" : ""}`.trim()}>
       <KineticField mode={kineticMode} intensity={kineticIntensity} progress={kineticProgress} pulseKey={visualPulse} />
-      <div className={`app-runtime ${bootVisible ? "boot-active" : ""}`.trim()} inert={bootVisible} aria-hidden={bootVisible ? true : undefined}>
+      <div className={`app-runtime ${bootVisible ? "boot-active" : ""} ${showMobileNav ? "has-mobile-nav" : ""}`.trim()} inert={bootVisible} aria-hidden={bootVisible ? true : undefined}>
         <Sidebar view={view} setView={setView} onAccount={() => setAccountOpen(true)} user={user} />
-        <div className="app-content">
+        <div ref={appContentRef} className="app-content">
           {view === "workout" ? content : <KineticPageTransition pageKey={`${view}-${checkingSession ? "checking" : user ? "ready" : "guest"}`} suspended={bootVisible}>{content}</KineticPageTransition>}
         </div>
-        {view !== "workout" && user && <MobileNav view={view} setView={setView} />}
+        {showMobileNav && <MobileNav view={view} setView={setView} />}
         {resting && <WorkoutRestOverlay exercise={resting.exercise} completedSet={resting.completedSet} onContinue={() => setResting(null)} onFinish={() => finishExercise(resting.exercise.id)} />}
         {(accountOpen || !user) && !checkingSession && <AccountDialog user={user} dashboard={dashboard} onClose={() => setAccountOpen(false)} onAuthenticated={(authenticatedUser) => { setUser(authenticatedUser); setAccountOpen(false); setDashboard(null); void loadDashboard(); }} onLoggedOut={() => { setUser(null); setDashboard(null); setAccountOpen(true); setView("today"); }} />}
         {notice && <div className="sync-toast" role="status"><Check size={18} />{notice}</div>}

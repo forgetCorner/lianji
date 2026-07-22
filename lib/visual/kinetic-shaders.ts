@@ -48,17 +48,7 @@ export const kineticFragmentShader = /* glsl */ `
     vec3 background = vec3(0.022, 0.034, 0.027);
     background += vec3(0.012, 0.024, 0.015) * vignette;
 
-    vec2 warped = p;
-    warped.y += sin(p.x * 1.45 + uTime * 0.08 + modeWave) * 0.055;
-    warped.x += sin(p.y * 1.8 - uTime * 0.055) * 0.035;
-
-    vec2 gridScale = vec2(9.0, 7.0);
-    vec2 grid = abs(fract(warped * gridScale + 0.5) - 0.5);
-    float gridLine = smoothstep(0.47, 0.495, max(grid.x, grid.y));
-    float gridFade = smoothstep(1.35, 0.2, length(vec2(p.x / max(uAspect, 1.0), p.y + 0.08)));
-
     vec3 color = background;
-    color += vec3(0.20, 0.34, 0.25) * gridLine * gridFade * 0.17;
 
     float trackOneY = sin(p.x * 1.8 + uTime * 0.13 + uMode * 0.27) * 0.18 - 0.03;
     float trackTwoY = sin(p.x * 1.15 - uTime * 0.09 + 2.1) * 0.28 + 0.2 + modeWave;

@@ -6,7 +6,7 @@ const root = new URL("../", import.meta.url);
 
 test("生产构建包含练迹页面与真实数据 API", async () => {
   await access(new URL("dist/server/index.js", root));
-  const [page, styles, hosting, visuals, bootSequence, kineticField, pageTransition, kineticScene, kineticShaders, kineticIcons, packageJson, favicon] = await Promise.all([
+  const [page, styles, hosting, visuals, bootSequence, kineticField, pageTransition, kineticScene, kineticShaders, kineticIcons, trackSelect, trainingPlan, packageJson, favicon] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
     readFile(new URL("app/globals.css", root), "utf8"),
     readFile(new URL(".openai/hosting.json", root), "utf8"),
@@ -17,6 +17,8 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
     readFile(new URL("lib/visual/kinetic-scene.ts", root), "utf8"),
     readFile(new URL("lib/visual/kinetic-shaders.ts", root), "utf8"),
     readFile(new URL("components/kinetic-icons.tsx", root), "utf8"),
+    readFile(new URL("components/track-select.tsx", root), "utf8"),
+    readFile(new URL("components/training-plan-view.tsx", root), "utf8"),
     readFile(new URL("package.json", root), "utf8"),
     readFile(new URL("public/favicon.svg", root), "utf8"),
   ]);
@@ -45,12 +47,28 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(page, /<AppBootSequence phase=\{bootPhase\}/);
   assert.match(page, /brandLanded \? "boot-arrived"/);
   assert.match(page, /bootVisible \? "boot-active"/);
+  assert.match(page, /appContentRef\.current\?\.scrollTo\(\{ top: 0/);
+  assert.match(page, /showMobileNav \? "has-mobile-nav"/);
+  assert.match(page, /profile-backdrop.+onClick=/);
+  assert.doesNotMatch(page, /profile-backdrop.+onMouseDown=/);
   assert.equal(page.match(/<Leaderboard /g)?.length, 1);
   assert.match(styles, /grid-template-columns: repeat\(4, 1fr\)/);
   assert.match(styles, /profile-drawer/);
+  assert.match(page, /profile-sheet-handle/);
+  assert.match(page, /训练数据已同步/);
+  assert.match(styles, /profile-drawer \.invite-generator[^}]+background: var\(--surface-2\)/);
   assert.match(styles, /\.boot-sequence/);
   assert.match(styles, /\.kinetic-field-layer[^}]+pointer-events: none/);
   assert.match(styles, /prefers-reduced-motion: reduce/);
+  assert.match(styles, /app-runtime\.has-mobile-nav \.app-content \{ height: calc\(100svh - var\(--mobile-nav-height\)\)/);
+  assert.match(styles, /\.today-view \{ padding-bottom: var\(--mobile-action-space\)/);
+  assert.match(styles, /\.plan-view \{ padding-inline: 18px; padding-bottom: 0/);
+  assert.match(styles, /\.day-editor \{ padding: 22px 0 0/);
+  assert.match(styles, /\.plan-save-bar \{ bottom: 0; justify-content: center/);
+  assert.match(styles, /touch-action: manipulation/);
+  assert.match(styles, /\.week-rail \{ touch-action: pan-x/);
+  assert.match(styles, /\.exercise-picker-options \{ touch-action: pan-y/);
+  assert.match(styles, /safe-area-inset-bottom/);
   assert.match(visuals, /export function TrackMark/);
   assert.match(visuals, /export function TrainingStatusMark/);
   assert.match(bootSequence, /role=\{phase === "error" \? "alert" : "status"\}/);
@@ -69,10 +87,22 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(kineticField, /kinetic-flight-end/);
   assert.match(pageTransition, /suspended = false/);
   assert.match(pageTransition, /staticTransition/);
+  assert.match(pageTransition, /transitionEnd: \{ transform: "none", filter: "none", clipPath: "none" \}/);
   assert.match(kineticScene, /powerPreference: "high-performance"/);
   assert.match(kineticScene, /LINK_STATUS/);
   assert.match(kineticShaders, /energyRibbon/);
   assert.match(kineticIcons, /export function KineticIcon/);
+  assert.match(trackSelect, /export function TrackSelect/);
+  assert.match(trackSelect, /export function ExercisePicker/);
+  assert.match(trackSelect, /createPortal/);
+  assert.match(trackSelect, /role="listbox"/);
+  assert.match(trackSelect, /event\.pointerType === "mouse"/);
+  assert.match(trackSelect, /className="exercise-picker-backdrop" onClick=\{close\}/);
+  assert.doesNotMatch(trackSelect, /className="exercise-picker-backdrop" onPointerDown/);
+  assert.doesNotMatch(trainingPlan, /<select/);
+  assert.match(trainingPlan, /<TrackSelect/);
+  assert.match(trainingPlan, /<ExercisePicker/);
+  assert.match(styles, /\.exercise-picker-backdrop/);
   assert.equal(JSON.parse(packageJson).dependencies.ogl.startsWith("^"), true);
   assert.equal(JSON.parse(packageJson).dependencies.motion.startsWith("^"), true);
   assert.match(favicon, /#C0FA4A/);

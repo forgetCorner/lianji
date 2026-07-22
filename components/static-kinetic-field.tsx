@@ -9,13 +9,8 @@ export function StaticKineticField({ mode }: { mode: KineticMode }) {
           <stop offset="0" stopColor="#17231b" stopOpacity=".58" />
           <stop offset="1" stopColor="#080b09" stopOpacity=".96" />
         </radialGradient>
-        <pattern id="kinetic-field-grid" width="72" height="72" patternUnits="userSpaceOnUse">
-          <path d="M72 0H0V72" fill="none" stroke="#54675a" strokeOpacity=".11" />
-          <circle cx="0" cy="0" r="1.4" fill="#c0fa4a" fillOpacity=".17" />
-        </pattern>
       </defs>
       <rect width="1440" height="900" fill="url(#kinetic-field-vignette)" />
-      <rect width="1440" height="900" fill="url(#kinetic-field-grid)" />
       <g transform={`translate(0 ${modeOffset % 88})`} fill="none" strokeLinecap="round">
         <path className="static-field-track is-back" d="M-80 312C172 130 384 520 636 306s442-130 914 40" />
         <path className="static-field-track is-live" d="M-80 312C172 130 384 520 636 306s442-130 914 40" pathLength="100" />
