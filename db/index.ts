@@ -200,6 +200,8 @@ export async function ensureDatabase(): Promise<void> {
       if (!setColumnNames.has("workout_exercise_id")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN workout_exercise_id TEXT"));
       if (!setColumnNames.has("tracking_type")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN tracking_type TEXT DEFAULT 'weight_reps' NOT NULL"));
       if (!setColumnNames.has("duration_seconds")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN duration_seconds INTEGER DEFAULT 0 NOT NULL"));
+      if (!setColumnNames.has("speed_kmh")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN speed_kmh REAL"));
+      if (!setColumnNames.has("incline_percent")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN incline_percent REAL"));
       if (!setColumnNames.has("left_weight_kg")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN left_weight_kg REAL"));
       if (!setColumnNames.has("right_weight_kg")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN right_weight_kg REAL"));
       if (!setColumnNames.has("effort")) additions.push(database.prepare("ALTER TABLE workout_sets ADD COLUMN effort INTEGER"));

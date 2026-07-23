@@ -6,7 +6,6 @@ import {
   ChevronDown,
   CircleAlert,
   History,
-  Play,
   Settings,
   Trophy,
   UserRound,
@@ -22,7 +21,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { targetLabel, weekdays } from "@/lib/training";
+import { ALTERNATIVE_EXERCISES_ENABLED, targetLabel, trainingDayDisplayName, weekdays } from "@/lib/training";
 import type { ActiveWorkout, PlanExercise, TodayWorkoutState, TrainingDay, TrainingPlan, WorkoutExercise } from "@/lib/training";
 import { nextShanghaiMidnight } from "@/lib/daily-workout-domain";
 import { TrainingPlanView } from "@/components/training-plan-view";
@@ -195,10 +194,11 @@ function ExerciseRail({ item, index, state = "pending" }: { item: PlanExercise; 
   );
 }
 
-function TodayView({ dashboard, activeWorkout, scrollerRef, selections, setSelections, onStart, onPlan, starting, error }: { dashboard: DashboardData; activeWorkout: ActiveWorkout | null; scrollerRef: RefObject<HTMLDivElement | null>; selections: ExerciseSelections; setSelections: Dispatch<SetStateAction<ExerciseSelections>>; onStart: (dayId: string, selections?: ExerciseSelections) => void; onPlan: () => void; starting: boolean; error: string | null }) {
+function TodayView({ dashboard, activeWorkout, scrollerRef, selections, setSelections, onPlan, error }: { dashboard: DashboardData; activeWorkout: ActiveWorkout | null; scrollerRef: RefObject<HTMLDivElement | null>; selections: ExerciseSelections; setSelections: Dispatch<SetStateAction<ExerciseSelections>>; onPlan: () => void; error: string | null }) {
   const now = new Date();
   const dayLabel = new Intl.DateTimeFormat("zh-CN", { month: "short", day: "2-digit", weekday: "short" }).format(now);
   const weeklyBars = Array.from({ length: dashboard.summary.weeklyTarget }, (_, index) => index < dashboard.summary.weeklyCount);
+  const weeklyProgressColumns = Math.max(1, weeklyBars.length);
   const plan = dashboard.todayPlan;
   const sourceDateRef = useRef<HTMLTimeElement>(null);
   const sourceIconRef = useRef<HTMLDivElement>(null);
@@ -206,9 +206,9 @@ function TodayView({ dashboard, activeWorkout, scrollerRef, selections, setSelec
   const targetIconRef = useRef<HTMLSpanElement>(null);
   const targetPrefixRef = useRef<HTMLSpanElement>(null);
   const targetTitleRef = useRef<HTMLSpanElement>(null);
-  const letter = plan ? (plan.name.match(/[A-Z]$/u)?.[0] ?? plan.name.slice(0, 1)) : null;
   const enabledDays = dashboard.plan.days.filter((day) => day.enabled);
-  const planName = plan?.name ?? "没有固定训练";
+  const planName = plan ? trainingDayDisplayName(plan.name) : "没有固定训练";
+  const letter = plan ? (planName.match(/[A-Z]$/u)?.[0] ?? planName.slice(0, 1)) : null;
   const currentWorkoutExercise = activeWorkout?.exercises.find((exercise) => !exercise.completedAt) ?? null;
   const workoutExercisesByPlanId = new Map(activeWorkout?.exercises.filter((exercise) => exercise.planExerciseId).map((exercise) => [exercise.planExerciseId!, exercise]) ?? []);
 
@@ -234,11 +234,13 @@ function TodayView({ dashboard, activeWorkout, scrollerRef, selections, setSelec
                 <div className="plan-streak"><KineticIcon kind="streak" active size={17} /><strong>{dashboard.summary.streak}</strong><span>连续训练日</span></div>
               </div>
               <h2><span ref={sourceTitleRef}>{planName}</span></h2>
-              <p>{plan ? `${plan.focus} · ${plan.exercises.length} 个动作` : "训练安排由你决定。可以休息，也可以从本周计划中任选一套自由训练。"}</p>
+              <p>{plan ? `${plan.focus} · ${plan.exercises.length} 个动作` : "今天没有安排计划训练，让身体恢复，为下一次训练做好准备。"}</p>
             </div>
             <div className="weekly-progress">
               <strong>本周 {dashboard.summary.weeklyCount} / {dashboard.summary.weeklyTarget}</strong>
-              <div>{weeklyBars.map((done, index) => <i key={index} className={done ? "done" : ""} />)}</div>
+              <div style={{ gridTemplateColumns: `repeat(${weeklyProgressColumns}, minmax(0, 1fr))` }}>
+                {weeklyBars.map((done, index) => <i key={index} className={done ? "done" : ""} />)}
+              </div>
             </div>
           </section>
 
@@ -249,9 +251,9 @@ function TodayView({ dashboard, activeWorkout, scrollerRef, selections, setSelec
               const state = workoutExercise?.completedAt ? "complete" : workoutExercise && currentWorkoutExercise?.id === workoutExercise.id ? "current" : "pending";
               return <div key={item.id}>
                 <ExerciseRail item={item} index={index} state={state} />
-                {item.alternativeName && <div className="alternative-choice" aria-label={`${item.name}备选动作`}><span>本次选择</span><button className={selections[item.id] !== "alternative" ? "active" : ""} onClick={() => setSelections((value) => ({ ...value, [item.id]: "primary" }))}>{item.name}</button><button className={selections[item.id] === "alternative" ? "active" : ""} onClick={() => setSelections((value) => ({ ...value, [item.id]: "alternative" }))}>{item.alternativeName}</button></div>}
+                {ALTERNATIVE_EXERCISES_ENABLED && item.alternativeName && <div className="alternative-choice" aria-label={`${item.name}备选动作`}><span>本次选择</span><button className={selections[item.id] !== "alternative" ? "active" : ""} onClick={() => setSelections((value) => ({ ...value, [item.id]: "primary" }))}>{item.name}</button><button className={selections[item.id] === "alternative" ? "active" : ""} onClick={() => setSelections((value) => ({ ...value, [item.id]: "alternative" }))}>{item.alternativeName}</button></div>}
               </div>;
-            }) : enabledDays.map((day) => <button className="free-plan-row" key={day.id} onClick={() => onStart(day.id)} disabled={starting}><span>{weekdays.find((item) => item.value === day.weekday)?.label}</span><strong>{day.name}</strong><small>{day.focus} · {day.exercises.length} 个动作</small><Play size={16} /></button>)}
+            }) : enabledDays.map((day) => <div className="free-plan-row is-readonly" key={day.id}><span>{weekdays.find((item) => item.value === day.weekday)?.label}</span><strong>{trainingDayDisplayName(day.name)}</strong><small>{day.focus} · {day.exercises.length} 个动作</small></div>)}
           </section>
 
         </div>
@@ -536,6 +538,7 @@ export default function Home() {
   const appContentRef = useRef<HTMLDivElement>(null);
   const [todayActionRoot, setTodayActionRoot] = useState<HTMLDivElement | null>(null);
   const [todaySelections, setTodaySelections] = useState<ExerciseSelections>({});
+  const [planWeekday, setPlanWeekday] = useState<number | null>(null);
   const [view, setView] = useState<View>("today");
   const [pageDirection, setPageDirection] = useState<1 | -1>(1);
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -617,8 +620,12 @@ export default function Home() {
   useEffect(() => {
     appContentRef.current?.style.setProperty("--header-collapse", "0");
     appContentRef.current?.style.setProperty("--profile-header-collapse", "0");
+    appContentRef.current?.style.setProperty("--plan-header-collapse", "0");
+    appContentRef.current?.style.setProperty("--plan-context-collapse", "0");
     if (appContentRef.current) appContentRef.current.dataset.headerCondensed = "false";
     if (appContentRef.current) appContentRef.current.dataset.profileHeaderCondensed = "false";
+    if (appContentRef.current) appContentRef.current.dataset.planHeaderCondensed = "false";
+    if (appContentRef.current) appContentRef.current.dataset.planContextCondensed = "false";
     appContentRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [view]);
@@ -769,7 +776,7 @@ export default function Home() {
   }
 
   const todayPlan = dashboard?.todayPlan ?? null;
-  const todayFloatingAction = view === "today" && (todayPlan || activeWorkout)
+  const todayFloatingAction = view === "today" && todayPlan
     ? todayWorkoutStatus === "completed"
       ? <button className="primary-action today-completed-action" type="button" disabled><Check size={21} />今日训练已完成</button>
       : <button className="primary-action" data-testid="start-workout" onClick={todayWorkoutStatus === "in_progress" && activeWorkout ? () => setView("workout") : () => startWorkout(todayPlan!.id, todaySelections)} disabled={saving}><KineticIcon kind="start" active size={22} />{saving ? "正在同步…" : todayWorkoutStatus === "in_progress" && activeWorkout ? `继续 ${currentWorkoutExercise?.selectedName ?? currentWorkoutExercise?.name ?? activeWorkout.planName}` : "开始训练"}</button>
@@ -779,9 +786,9 @@ export default function Home() {
     : !user ? <div className="screen-state"><UserRound size={28} /><strong>登录后开始训练</strong><p>账号入口已打开。</p></div>
     : dashboardError ? <div className="screen-state"><Activity size={28} /><strong>同步暂时失败</strong><p>{dashboardError}</p><button className="secondary-action" onClick={() => void loadDashboard()}>重新同步</button></div>
     : !dashboard ? <div className="screen-state"><Activity size={28} /><strong>正在读取真实数据</strong></div>
-    : view === "today" ? <TodayView dashboard={dashboard} activeWorkout={activeWorkout} scrollerRef={appContentRef} selections={todaySelections} setSelections={setTodaySelections} onStart={startWorkout} onPlan={() => navigateView("plan")} starting={saving} error={workoutError} />
-    : view === "plan" ? <TrainingPlanView key={dashboard.plan.version} plan={dashboard.plan} onSave={savePlan} saving={saving} error={workoutError} />
-    : view === "workout" && activeWorkout && currentWorkoutExercise ? <ActiveWorkoutView key={currentWorkoutExercise.id} workout={activeWorkout} exercise={currentWorkoutExercise} onBack={() => setView("today")} onSaveSet={saveSet} onSkip={() => finishExercise(currentWorkoutExercise.id, true)} saving={saving} error={workoutError} />
+    : view === "today" ? <TodayView dashboard={dashboard} activeWorkout={activeWorkout} scrollerRef={appContentRef} selections={todaySelections} setSelections={setTodaySelections} onPlan={() => navigateView("plan")} error={workoutError} />
+    : view === "plan" ? <TrainingPlanView key={dashboard.plan.version} plan={dashboard.plan} scrollerRef={appContentRef} initialWeekday={planWeekday} onWeekdayChange={setPlanWeekday} onSave={savePlan} saving={saving} error={workoutError} />
+    : view === "workout" && activeWorkout && currentWorkoutExercise ? <ActiveWorkoutView workout={activeWorkout} exercise={currentWorkoutExercise} onBack={() => setView("today")} onSaveSet={saveSet} onSkip={() => finishExercise(currentWorkoutExercise.id, true)} saving={saving} error={workoutError} />
     : view === "ranking" ? <RankingView entries={dashboard.leaderboard} />
     : <ProfileView dashboard={dashboard} scrollerRef={appContentRef} accountOpen={accountOpen} onAccount={() => setAccountOpen(true)} />;
   const showMobileNav = view !== "workout" && Boolean(user);

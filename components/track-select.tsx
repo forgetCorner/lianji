@@ -192,13 +192,12 @@ function useMobileQuery() {
   return mobile;
 }
 
-export function ExercisePicker({ ariaLabel, value, displayValue, options, onSelect, onCreateCustom }: {
+export function ExercisePicker({ ariaLabel, value, displayValue, options, onSelect }: {
   ariaLabel: string;
   value: string;
   displayValue?: string;
   options: ExerciseDefinition[];
   onSelect: (value: string) => void;
-  onCreateCustom: () => void;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -210,13 +209,11 @@ export function ExercisePicker({ ariaLabel, value, displayValue, options, onSele
   const reduceMotion = useReducedMotion();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const customOption = useMemo<ExerciseDefinition>(() => ({ exerciseId: "custom", name: "自定义动作", equipment: "手动填写", muscleGroup: "", trackingType: "weight_reps", weightMode: "total" }), []);
-  const allOptions = useMemo(() => [customOption, ...options], [customOption, options]);
   const filtered = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase("zh-CN");
-    if (!keyword) return allOptions;
-    return allOptions.filter((option) => `${option.name} ${option.equipment} ${option.muscleGroup}`.toLocaleLowerCase("zh-CN").includes(keyword));
-  }, [allOptions, query]);
+    if (!keyword) return options;
+    return options.filter((option) => `${option.name} ${option.equipment} ${option.muscleGroup}`.toLocaleLowerCase("zh-CN").includes(keyword));
+  }, [options, query]);
   const safeActiveIndex = Math.min(activeIndex, Math.max(0, filtered.length - 1));
   const selected = options.find((option) => option.exerciseId === value);
   const position = useAnchoredPosition(open && !mobile, triggerRef, 340, 390);
@@ -225,15 +222,14 @@ export function ExercisePicker({ ariaLabel, value, displayValue, options, onSele
     setQuery("");
   }, []);
   const openPicker = useCallback(() => {
-    const selectedIndex = allOptions.findIndex((option) => option.exerciseId === value);
+    const selectedIndex = options.findIndex((option) => option.exerciseId === value);
     setActiveIndex(Math.max(0, selectedIndex));
     setOpen(true);
-  }, [allOptions, value]);
+  }, [options, value]);
   const choose = useCallback((option: ExerciseDefinition) => {
-    if (option.exerciseId === "custom") onCreateCustom();
-    else onSelect(option.exerciseId);
+    onSelect(option.exerciseId);
     close();
-  }, [close, onCreateCustom, onSelect]);
+  }, [close, onSelect]);
 
   useOutsideDismiss(open && !mobile, triggerRef, popupRef, close);
 
@@ -267,7 +263,6 @@ export function ExercisePicker({ ariaLabel, value, displayValue, options, onSele
       event.preventDefault();
       const option = filtered[safeActiveIndex];
       if (option) choose(option);
-      else onCreateCustom();
     }
   }
 
@@ -296,7 +291,7 @@ export function ExercisePicker({ ariaLabel, value, displayValue, options, onSele
           if (event.pointerType === "mouse") setActiveIndex(index);
         }}
         onClick={() => choose(option)}
-      ><span><strong>{option.name}</strong><small>{[option.equipment, option.muscleGroup].filter(Boolean).join(" · ")}</small></span>{option.exerciseId === value && <Check size={16} />}</button>) : <div className="exercise-picker-empty"><strong>没有匹配动作</strong><span>可以换个关键词，或者直接新建。</span><button type="button" onClick={() => { onCreateCustom(); close(); }}>新建自定义动作</button></div>}
+      ><span><strong>{option.name}</strong><small>{[option.equipment, option.muscleGroup].filter(Boolean).join(" · ")}</small></span>{option.exerciseId === value && <Check size={16} />}</button>) : <div className="exercise-picker-empty"><strong>没有匹配动作</strong><span>换个关键词再试试。</span></div>}
     </div>
   </>;
 

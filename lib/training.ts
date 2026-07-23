@@ -1,6 +1,26 @@
 export type TrackingType = "weight_reps" | "duration" | "bodyweight_reps" | "bodyweight_duration";
 export type WeightMode = "total" | "per_side" | "none";
 
+export const INCLINE_WALK_EXERCISE_ID = "incline-walk";
+export const MAX_SETS_PER_EXERCISE = 6;
+export const DEFAULT_REST_SECONDS = 90;
+export const ALTERNATIVE_EXERCISES_ENABLED = false;
+
+export function restSecondsForSets(maxSets: number): number {
+  return maxSets > 1 ? DEFAULT_REST_SECONDS : 0;
+}
+
+export function isInclineWalkExercise(exerciseId: string): boolean {
+  return exerciseId === INCLINE_WALK_EXERCISE_ID;
+}
+
+export function validateInclineWalkMetrics(exerciseId: string, speedKmh: number | null, inclinePercent: number | null): string | null {
+  if (!isInclineWalkExercise(exerciseId)) return null;
+  if (speedKmh === null || !Number.isFinite(speedKmh) || speedKmh < 0 || speedKmh > 50) return "爬坡速度应为 0 到 50 km/h";
+  if (inclinePercent === null || !Number.isFinite(inclinePercent) || inclinePercent < 0 || inclinePercent > 30) return "爬坡坡度应为 0% 到 30%";
+  return null;
+}
+
 export type ExerciseDefinition = {
   exerciseId: string;
   name: string;
@@ -46,6 +66,34 @@ export type TrainingPlan = {
   days: TrainingDay[];
 };
 
+function stableSerialize(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+export function hasTrainingPlanChanges(current: TrainingPlan, saved: TrainingPlan): boolean {
+  const editableSnapshot = (plan: TrainingPlan) => ({
+    id: plan.id,
+    name: plan.name,
+    days: plan.days,
+  });
+  return stableSerialize(editableSnapshot(current)) !== stableSerialize(editableSnapshot(saved));
+}
+
+export function hasTrainingPlanSetCountDraftChanges(current: TrainingPlan, drafts: Record<string, string>): boolean {
+  return Object.entries(drafts).some(([key, rawValue]) => {
+    const [exerciseId, field] = key.split(":");
+    const exercise = current.days.flatMap((day) => day.exercises).find((item) => item.id === exerciseId);
+    if (!exercise) return true;
+    const currentValue = field === "min" ? exercise.minSets : exercise.maxSets;
+    return rawValue !== String(currentValue);
+  });
+}
+
 export type WorkoutSet = {
   id: string;
   workoutExerciseId: string | null;
@@ -57,6 +105,8 @@ export type WorkoutSet = {
   rightWeightKg: number | null;
   reps: number;
   durationSeconds: number;
+  speedKmh: number | null;
+  inclinePercent: number | null;
   completedAt: number;
 };
 
@@ -71,6 +121,8 @@ export type WorkoutExercise = PlanExercise & {
   lastWeightKg: number;
   lastLeftWeightKg: number | null;
   lastRightWeightKg: number | null;
+  lastSpeedKmh: number | null;
+  lastInclinePercent: number | null;
 };
 
 export type ActiveWorkout = {
@@ -91,6 +143,18 @@ export type TodayWorkoutState = {
   status: "not_started" | "in_progress" | "completed";
   workout: ActiveWorkout | null;
 };
+
+export function trainingDayDisplayName(name: string): string {
+  return name.trim() || "未命名训练";
+}
+
+export function normalizeLegacyTrainingDayName(name: string, enabled: boolean, exerciseCount: number): string {
+  return !enabled && exerciseCount === 0 && name === "训练日" ? "" : name;
+}
+
+export function normalizeLegacyTrainingDayFocus(focus: string, enabled: boolean, exerciseCount: number): string {
+  return !enabled && exerciseCount === 0 && focus === "自定义" ? "" : focus;
+}
 
 export const weekdays = [
   { value: 1, short: "一", label: "周一" },

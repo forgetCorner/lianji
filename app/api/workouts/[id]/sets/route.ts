@@ -3,7 +3,7 @@ import { getSessionUser } from "@/lib/server/auth";
 import { jsonError, jsonOk, readJsonObject, serverError, validateMutationRequest } from "@/lib/server/http";
 import { getWorkout } from "@/lib/server/workouts";
 import { shanghaiDateKey } from "@/lib/daily-workout-domain";
-import type { TrackingType, WeightMode } from "@/lib/training";
+import { isInclineWalkExercise, validateInclineWalkMetrics, type TrackingType, type WeightMode } from "@/lib/training";
 
 type ExerciseRow = {
   id: string;
@@ -28,6 +28,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const setIndex = typeof body?.setIndex === "number" ? Math.round(body.setIndex) : 0;
     const reps = typeof body?.reps === "number" ? Math.round(body.reps) : 0;
     const durationSeconds = typeof body?.durationSeconds === "number" ? Math.round(body.durationSeconds) : 0;
+    const rawSpeedKmh = typeof body?.speedKmh === "number" ? body.speedKmh : null;
+    const rawInclinePercent = typeof body?.inclinePercent === "number" ? body.inclinePercent : null;
     const rawWeight = typeof body?.weightKg === "number" ? body.weightKg : 0;
     const leftWeightKg = typeof body?.leftWeightKg === "number" ? body.leftWeightKg : null;
     const rightWeightKg = typeof body?.rightWeightKg === "number" ? body.rightWeightKg : null;
@@ -56,26 +58,32 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     const isDuration = exercise.tracking_type === "duration" || exercise.tracking_type === "bodyweight_duration";
     const isReps = exercise.tracking_type === "weight_reps" || exercise.tracking_type === "bodyweight_reps";
+    const isInclineWalk = isInclineWalkExercise(exercise.exercise_id);
     if (isDuration && (durationSeconds < 1 || durationSeconds > 4 * 60 * 60)) return jsonError(400, "BAD_REQUEST", "训练时长不正确");
     if (isReps && (reps < 1 || reps > 300)) return jsonError(400, "BAD_REQUEST", "训练次数不正确");
+    const inclineWalkMetricsError = validateInclineWalkMetrics(exercise.exercise_id, rawSpeedKmh, rawInclinePercent);
+    if (inclineWalkMetricsError) return jsonError(400, "BAD_REQUEST", inclineWalkMetricsError);
     if (rawWeight < 0 || rawWeight > 2000 || (leftWeightKg !== null && (leftWeightKg < 0 || leftWeightKg > 1000)) || (rightWeightKg !== null && (rightWeightKg < 0 || rightWeightKg > 1000))) {
       return jsonError(400, "BAD_REQUEST", "训练重量不正确");
     }
     if (effort !== null && (effort < 1 || effort > 5)) return jsonError(400, "BAD_REQUEST", "训练感受应为 1 到 5");
     const weightKg = exercise.weight_mode === "per_side" ? (leftWeightKg ?? 0) + (rightWeightKg ?? 0) : rawWeight;
+    const speedKmh = isInclineWalk ? Math.round(rawSpeedKmh! * 10) / 10 : null;
+    const inclinePercent = isInclineWalk ? Math.round(rawInclinePercent!) : null;
     const completedAt = Date.now();
     const setId = crypto.randomUUID();
     await database.prepare(
       `INSERT INTO workout_sets
        (id, workout_session_id, user_id, exercise_id, exercise_name, muscle_group, set_index, weight_kg, reps, completed_at,
-        workout_exercise_id, tracking_type, duration_seconds, left_weight_kg, right_weight_kg, effort)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        workout_exercise_id, tracking_type, duration_seconds, speed_kmh, incline_percent, left_weight_kg, right_weight_kg, effort)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(workout_exercise_id, set_index) DO UPDATE SET
        weight_kg = excluded.weight_kg, reps = excluded.reps, completed_at = excluded.completed_at,
-       tracking_type = excluded.tracking_type, duration_seconds = excluded.duration_seconds,
+       tracking_type = excluded.tracking_type, duration_seconds = excluded.duration_seconds, speed_kmh = excluded.speed_kmh,
+       incline_percent = excluded.incline_percent,
        left_weight_kg = excluded.left_weight_kg, right_weight_kg = excluded.right_weight_kg, effort = excluded.effort`,
     ).bind(setId, workoutId, user.id, exercise.exercise_id, exercise.name, exercise.muscle_group, setIndex, weightKg, reps, completedAt,
-      workoutExerciseId, exercise.tracking_type, durationSeconds, leftWeightKg, rightWeightKg, effort).run();
+      workoutExerciseId, exercise.tracking_type, durationSeconds, speedKmh, inclinePercent, leftWeightKg, rightWeightKg, effort).run();
     return jsonOk({ workout: await getWorkout(user.id, workoutId) }, { status: 201 });
   } catch (error) {
     return serverError(error);

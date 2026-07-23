@@ -1,9 +1,10 @@
 import { ensureDatabase, getD1 } from "@/db";
 import { getSessionUser } from "@/lib/server/auth";
 import { jsonError, jsonOk, readJsonObject, serverError, validateMutationRequest } from "@/lib/server/http";
-import { getActivePlan } from "@/lib/server/plans";
+import { getActivePlan, shanghaiWeekday } from "@/lib/server/plans";
 import { getTodayWorkoutState, getWorkout } from "@/lib/server/workouts";
 import { shanghaiDateKey } from "@/lib/daily-workout-domain";
+import { trainingDayDisplayName } from "@/lib/training";
 
 export async function GET(request: Request): Promise<Response> {
   try {
@@ -43,21 +44,23 @@ export async function POST(request: Request): Promise<Response> {
     if (shanghaiDateKey(startedAt) !== shanghaiDateKey()) return jsonError(400, "BAD_REQUEST", "只能开始今天的计划训练");
 
     await ensureDatabase();
+    const plan = await getActivePlan(user.id);
+    const database = getD1();
+    const now = Date.now();
+    const day = plan.days.find((item) => item.weekday === shanghaiWeekday(now));
+    if (!day?.enabled || !day.exercises.length) return jsonError(409, "CONFLICT", "今天是恢复日，没有安排计划训练");
+    if (day.id !== planDayId) return jsonError(409, "CONFLICT", "只能开始今天安排的训练计划");
     const existing = await getTodayWorkoutState(user.id);
     if (existing.status === "completed") return jsonError(409, "TODAY_PLAN_COMPLETED", "今日计划训练已完成");
     if (existing.status === "in_progress") return jsonOk(existing);
-    const plan = await getActivePlan(user.id);
-    const day = plan.days.find((item) => item.id === planDayId);
-    if (!day || !day.exercises.length) return jsonError(404, "NOT_FOUND", "这一天还没有可执行的训练动作");
-    const database = getD1();
-    const now = Date.now();
-    const workout = { id: crypto.randomUUID(), planName: day.name, planDayId: day.id, startedAt, completedAt: null, durationSeconds: 0, notes: "" };
+    const planName = trainingDayDisplayName(day.name);
+    const workout = { id: crypto.randomUUID(), planName, planDayId: day.id, startedAt, completedAt: null, durationSeconds: 0, notes: "" };
     const statements = [database.prepare(
       `INSERT INTO workout_sessions
        (id, user_id, plan_name, started_at, completed_at, duration_seconds, notes, plan_id, plan_day_id, plan_version,
         workout_type, training_date, finalized_at, synced_plan_version, resumed_at)
        VALUES (?, ?, ?, ?, NULL, 0, '', ?, ?, ?, 'plan', ?, NULL, ?, ?)`,
-    ).bind(workout.id, user.id, day.name, startedAt, plan.id, day.id, plan.version, shanghaiDateKey(now), plan.version, now)];
+    ).bind(workout.id, user.id, planName, startedAt, plan.id, day.id, plan.version, shanghaiDateKey(now), plan.version, now)];
     for (const exercise of day.exercises) {
       const useAlternative = selections[exercise.id] === "alternative" && exercise.alternativeName;
       const exerciseId = useAlternative ? exercise.alternativeExerciseId! : exercise.exerciseId;

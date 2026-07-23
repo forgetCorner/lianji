@@ -93,6 +93,8 @@ export const workoutSets = sqliteTable(
     workoutExerciseId: text("workout_exercise_id"),
     trackingType: text("tracking_type").notNull().default("weight_reps"),
     durationSeconds: integer("duration_seconds").notNull().default(0),
+    speedKmh: real("speed_kmh"),
+    inclinePercent: real("incline_percent"),
     leftWeightKg: real("left_weight_kg"),
     rightWeightKg: real("right_weight_kg"),
     effort: integer("effort"),

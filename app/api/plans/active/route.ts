@@ -2,7 +2,7 @@ import { getSessionUser } from "@/lib/server/auth";
 import { jsonError, jsonOk, readJsonObject, serverError, validateMutationRequest } from "@/lib/server/http";
 import { getActivePlan, replaceActivePlan } from "@/lib/server/plans";
 import { reconcileTodayPlanWorkout } from "@/lib/server/workouts";
-import type { PlanExercise, TrackingType, TrainingDay, TrainingPlan, WeightMode } from "@/lib/training";
+import { exerciseLibrary, MAX_SETS_PER_EXERCISE, restSecondsForSets, type PlanExercise, type TrackingType, type TrainingDay, type TrainingPlan, type WeightMode } from "@/lib/training";
 
 const trackingTypes = new Set<TrackingType>(["weight_reps", "duration", "bodyweight_reps", "bodyweight_duration"]);
 const weightModes = new Set<WeightMode>(["total", "per_side", "none"]);
@@ -19,25 +19,48 @@ function nullableNumber(value: unknown, min: number, max: number): number | null
   return typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : null;
 }
 
+function exceedsSetLimit(body: Record<string, unknown> | null): boolean {
+  if (!body || !Array.isArray(body.days)) return false;
+  return body.days.some((day) => {
+    if (!day || typeof day !== "object" || Array.isArray(day)) return false;
+    const exercises = (day as Record<string, unknown>).exercises;
+    if (!Array.isArray(exercises)) return false;
+    return exercises.some((exercise) => {
+      if (!exercise || typeof exercise !== "object" || Array.isArray(exercise)) return false;
+      const row = exercise as Record<string, unknown>;
+      return (typeof row.minSets === "number" && row.minSets > MAX_SETS_PER_EXERCISE)
+        || (typeof row.maxSets === "number" && row.maxSets > MAX_SETS_PER_EXERCISE);
+    });
+  });
+}
+
 function parseExercise(value: unknown, position: number): PlanExercise | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const name = text(row.name, 60);
   if (!name) return null;
-  const trackingType = trackingTypes.has(row.trackingType as TrackingType) ? row.trackingType as TrackingType : "weight_reps";
-  const weightMode = weightModes.has(row.weightMode as WeightMode) ? row.weightMode as WeightMode : trackingType.includes("bodyweight") || trackingType === "duration" ? "none" : "total";
-  const minSets = integer(row.minSets, 3, 1, 12);
-  const maxSets = integer(row.maxSets, minSets, minSets, 12);
+  const exerciseId = text(row.exerciseId, 80) || `custom-${crypto.randomUUID()}`;
+  const definition = exerciseLibrary.find((exercise) => exercise.exerciseId === exerciseId);
+  const requestedTrackingType = trackingTypes.has(row.trackingType as TrackingType) ? row.trackingType as TrackingType : "weight_reps";
+  const trackingType = definition?.trackingType ?? requestedTrackingType;
+  const requestedWeightMode = weightModes.has(row.weightMode as WeightMode) ? row.weightMode as WeightMode : null;
+  const weightMode = trackingType === "weight_reps"
+    ? requestedWeightMode === "total" || requestedWeightMode === "per_side"
+      ? requestedWeightMode
+      : definition?.weightMode === "per_side" ? "per_side" : "total"
+    : "none";
+  const minSets = integer(row.minSets, 3, 1, MAX_SETS_PER_EXERCISE);
+  const maxSets = integer(row.maxSets, minSets, minSets, MAX_SETS_PER_EXERCISE);
   const minReps = integer(row.minReps, trackingType.endsWith("reps") ? 10 : 0, 0, 300);
   const maxReps = integer(row.maxReps, minReps, minReps, 300);
   const minDurationSeconds = integer(row.minDurationSeconds, trackingType.includes("duration") ? 60 : 0, 0, 4 * 60 * 60);
   const maxDurationSeconds = integer(row.maxDurationSeconds, minDurationSeconds, minDurationSeconds, 4 * 60 * 60);
   return {
     id: text(row.id, 80) || crypto.randomUUID(),
-    exerciseId: text(row.exerciseId, 80) || `custom-${crypto.randomUUID()}`,
+    exerciseId,
     name,
-    equipment: text(row.equipment, 60),
-    muscleGroup: text(row.muscleGroup, 60),
+    equipment: definition?.equipment ?? text(row.equipment, 60),
+    muscleGroup: definition?.muscleGroup ?? text(row.muscleGroup, 60),
     trackingType,
     weightMode,
     minSets,
@@ -46,7 +69,7 @@ function parseExercise(value: unknown, position: number): PlanExercise | null {
     maxReps,
     minDurationSeconds,
     maxDurationSeconds,
-    restSeconds: integer(row.restSeconds, 90, 0, 15 * 60),
+    restSeconds: restSecondsForSets(maxSets),
     speedMin: nullableNumber(row.speedMin, 0, 50),
     speedMax: nullableNumber(row.speedMax, 0, 50),
     notes: text(row.notes, 300),
@@ -84,7 +107,7 @@ function parsePlan(body: Record<string, unknown> | null): TrainingPlan | null {
     days.push({
       id: dayId,
       weekday,
-      name: text(row.name, 60) || "训练日",
+      name: text(row.name, 60),
       focus: text(row.focus, 100),
       enabled,
       position,
@@ -110,7 +133,9 @@ export async function PUT(request: Request): Promise<Response> {
   try {
     const user = await getSessionUser(request);
     if (!user) return jsonError(401, "UNAUTHORIZED", "请先登录");
-    const plan = parsePlan(await readJsonObject(request));
+    const body = await readJsonObject(request);
+    if (exceedsSetLimit(body)) return jsonError(400, "BAD_REQUEST", `每个动作最多 ${MAX_SETS_PER_EXERCISE} 组`);
+    const plan = parsePlan(body);
     if (!plan) return jsonError(400, "BAD_REQUEST", "训练计划数据不完整");
     const saved = await replaceActivePlan(user.id, plan);
     if (!saved) return jsonError(409, "CONFLICT", "计划已在其他设备更新，请重新加载后再保存");

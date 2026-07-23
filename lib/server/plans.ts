@@ -1,4 +1,5 @@
 import { ensureDatabase, getD1 } from "@/db";
+import { normalizeLegacyTrainingDayFocus, normalizeLegacyTrainingDayName, restSecondsForSets } from "@/lib/training";
 import type { PlanExercise, TrackingType, TrainingPlan, WeightMode } from "@/lib/training";
 
 type PlanRow = { id: string; name: string; version: number; updated_at: number };
@@ -44,16 +45,16 @@ const emptyExerciseDefaults = {
   alternativeEquipment: null,
 } as const;
 
-function weighted(exerciseId: string, name: string, equipment: string, muscleGroup: string, minSets = 3, maxSets = 3, minReps = 10, maxReps = 12, weightMode: WeightMode = "total", restSeconds = 90): DefaultExercise {
-  return { ...emptyExerciseDefaults, exerciseId, name, equipment, muscleGroup, trackingType: "weight_reps", weightMode, minSets, maxSets, minReps, maxReps, restSeconds };
+function weighted(exerciseId: string, name: string, equipment: string, muscleGroup: string, minSets = 3, maxSets = 3, minReps = 10, maxReps = 12, weightMode: WeightMode = "total"): DefaultExercise {
+  return { ...emptyExerciseDefaults, exerciseId, name, equipment, muscleGroup, trackingType: "weight_reps", weightMode, minSets, maxSets, minReps, maxReps, restSeconds: restSecondsForSets(maxSets) };
 }
 
 function duration(exerciseId: string, name: string, equipment: string, muscleGroup: string, minSeconds: number, maxSeconds: number, minSets = 1, maxSets = 1, trackingType: TrackingType = "duration"): DefaultExercise {
-  return { ...emptyExerciseDefaults, exerciseId, name, equipment, muscleGroup, trackingType, weightMode: "none", minSets, maxSets, minDurationSeconds: minSeconds, maxDurationSeconds: maxSeconds, restSeconds: maxSets > 1 ? 60 : 0 };
+  return { ...emptyExerciseDefaults, exerciseId, name, equipment, muscleGroup, trackingType, weightMode: "none", minSets, maxSets, minDurationSeconds: minSeconds, maxDurationSeconds: maxSeconds, restSeconds: restSecondsForSets(maxSets) };
 }
 
 function bodyweightReps(exerciseId: string, name: string, muscleGroup: string, minSets: number, maxSets: number, minReps: number, maxReps: number): DefaultExercise {
-  return { ...emptyExerciseDefaults, exerciseId, name, equipment: "垫子", muscleGroup, trackingType: "bodyweight_reps", weightMode: "none", minSets, maxSets, minReps, maxReps, restSeconds: 60 };
+  return { ...emptyExerciseDefaults, exerciseId, name, equipment: "垫子", muscleGroup, trackingType: "bodyweight_reps", weightMode: "none", minSets, maxSets, minReps, maxReps, restSeconds: restSecondsForSets(maxSets) };
 }
 
 const defaultDays: Array<{ weekday: number; name: string; focus: string; enabled: boolean; exercises: DefaultExercise[] }> = [
@@ -72,7 +73,7 @@ const defaultDays: Array<{ weekday: number; name: string; focus: string; enabled
       { ...duration("incline-walk", "爬坡", "跑步机", "有氧", 20 * 60, 25 * 60), notes: "保持可以短句交流的强度" },
     ],
   },
-  { weekday: 2, name: "训练日", focus: "自定义", enabled: false, exercises: [] },
+  { weekday: 2, name: "", focus: "", enabled: false, exercises: [] },
   {
     weekday: 3,
     name: "全身 B",
@@ -84,11 +85,11 @@ const defaultDays: Array<{ weekday: number; name: string; focus: string; enabled
       weighted("hip-thrust", "臀推", "臀推机", "臀腿"),
       weighted("seated-shoulder-press", "坐姿推肩", "坐姿推肩机", "肩部", 3, 3, 10, 12, "per_side"),
       weighted("hip-abduction", "髋外展", "开合腿机", "臀部", 2, 3, 12, 15),
-      weighted("face-pull", "面拉", "龙门架", "肩后束", 2, 3, 12, 15, "total", 60),
+      weighted("face-pull", "面拉", "龙门架", "肩后束", 2, 3, 12, 15),
       bodyweightReps("dead-bug", "死虫", "核心", 3, 3, 10, 12),
     ],
   },
-  { weekday: 4, name: "训练日", focus: "自定义", enabled: false, exercises: [] },
+  { weekday: 4, name: "", focus: "", enabled: false, exercises: [] },
   {
     weekday: 5,
     name: "全身 C",
@@ -100,12 +101,12 @@ const defaultDays: Array<{ weekday: number; name: string; focus: string; enabled
       weighted("incline-chest-press", "上斜推胸", "上斜推胸机", "胸部", 3, 3, 10, 12, "per_side"),
       { ...weighted("lat-pulldown", "高位下拉", "高位下拉机", "背部"), alternativeExerciseId: "seated-row", alternativeName: "坐姿划船", alternativeEquipment: "划船机" },
       weighted("leg-extension", "腿屈伸", "腿屈伸机", "股四头肌", 2, 2, 12, 15),
-      weighted("triceps-pushdown", "绳索下压", "龙门架", "肱三头肌", 2, 2, 12, 15, "total", 60),
+      weighted("triceps-pushdown", "绳索下压", "龙门架", "肱三头肌", 2, 2, 12, 15),
       bodyweightReps("crunch", "卷腹", "核心", 3, 3, 12, 15),
     ],
   },
-  { weekday: 6, name: "训练日", focus: "自定义", enabled: false, exercises: [] },
-  { weekday: 7, name: "训练日", focus: "自定义", enabled: false, exercises: [] },
+  { weekday: 6, name: "", focus: "", enabled: false, exercises: [] },
+  { weekday: 7, name: "", focus: "", enabled: false, exercises: [] },
 ];
 
 function mapExercise(row: ExerciseRow): PlanExercise {
@@ -123,7 +124,7 @@ function mapExercise(row: ExerciseRow): PlanExercise {
     maxReps: row.max_reps,
     minDurationSeconds: row.min_duration_seconds,
     maxDurationSeconds: row.max_duration_seconds,
-    restSeconds: row.rest_seconds,
+    restSeconds: restSecondsForSets(row.max_sets),
     speedMin: row.speed_min,
     speedMax: row.speed_max,
     notes: row.notes,
@@ -150,15 +151,19 @@ async function readPlan(userId: string, row: PlanRow): Promise<TrainingPlan> {
     name: row.name,
     version: row.version,
     updatedAt: row.updated_at,
-    days: dayResult.results.map((day) => ({
-      id: day.id,
-      weekday: day.weekday,
-      name: day.name,
-      focus: day.focus,
-      enabled: Boolean(day.enabled),
-      position: day.position,
-      exercises: exerciseResult.results.filter((exercise) => exercise.plan_day_id === day.id).map(mapExercise),
-    })),
+    days: dayResult.results.map((day) => {
+      const enabled = Boolean(day.enabled);
+      const exercises = exerciseResult.results.filter((exercise) => exercise.plan_day_id === day.id).map(mapExercise);
+      return {
+        id: day.id,
+        weekday: day.weekday,
+        name: normalizeLegacyTrainingDayName(day.name, enabled, exercises.length),
+        focus: normalizeLegacyTrainingDayFocus(day.focus, enabled, exercises.length),
+        enabled,
+        position: day.position,
+        exercises,
+      };
+    }),
   };
 }
 

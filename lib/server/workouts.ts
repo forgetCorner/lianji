@@ -14,6 +14,7 @@ import type {
   WorkoutExercise,
   WorkoutSet,
 } from "@/lib/training";
+import { isInclineWalkExercise, restSecondsForSets } from "@/lib/training";
 
 type SessionRow = {
   id: string;
@@ -69,9 +70,19 @@ type SetRow = {
   right_weight_kg: number | null;
   reps: number;
   duration_seconds: number;
+  speed_kmh: number | null;
+  incline_percent: number | null;
   completed_at: number;
 };
-type LastLoadRow = { exercise_id: string; weight_kg: number; left_weight_kg: number | null; right_weight_kg: number | null };
+type LastSetMetricRow = {
+  exercise_id: string;
+  tracking_type: TrackingType;
+  weight_kg: number;
+  left_weight_kg: number | null;
+  right_weight_kg: number | null;
+  speed_kmh: number | null;
+  incline_percent: number | null;
+};
 
 const sessionSelection = `id, plan_name, plan_id, plan_day_id, plan_version, started_at, completed_at, duration_seconds,
   workout_type, training_date, finalized_at, synced_plan_version, resumed_at`;
@@ -88,24 +99,33 @@ function mapSet(row: SetRow): WorkoutSet {
     rightWeightKg: row.right_weight_kg,
     reps: row.reps,
     durationSeconds: row.duration_seconds,
+    speedKmh: row.speed_kmh,
+    inclinePercent: row.incline_percent,
     completedAt: row.completed_at,
   };
 }
 
 async function readWorkout(userId: string, session: SessionRow): Promise<ActiveWorkout> {
   const database = getD1();
-  const [exerciseResult, setResult, lastLoadResult] = await Promise.all([
+  const [exerciseResult, setResult, lastMetricResult] = await Promise.all([
     database.prepare("SELECT * FROM workout_exercises WHERE workout_session_id = ? AND user_id = ? ORDER BY position, id").bind(session.id, userId).all<ExerciseRow>(),
-    database.prepare("SELECT id, workout_exercise_id, exercise_id, set_index, tracking_type, weight_kg, left_weight_kg, right_weight_kg, reps, duration_seconds, completed_at FROM workout_sets WHERE workout_session_id = ? AND user_id = ? ORDER BY completed_at").bind(session.id, userId).all<SetRow>(),
-    database.prepare("SELECT exercise_id, weight_kg, left_weight_kg, right_weight_kg FROM workout_sets WHERE user_id = ? AND workout_session_id <> ? AND tracking_type = 'weight_reps' ORDER BY completed_at DESC").bind(userId, session.id).all<LastLoadRow>(),
+    database.prepare("SELECT id, workout_exercise_id, exercise_id, set_index, tracking_type, weight_kg, left_weight_kg, right_weight_kg, reps, duration_seconds, speed_kmh, incline_percent, completed_at FROM workout_sets WHERE workout_session_id = ? AND user_id = ? ORDER BY completed_at").bind(session.id, userId).all<SetRow>(),
+    database.prepare("SELECT exercise_id, tracking_type, weight_kg, left_weight_kg, right_weight_kg, speed_kmh, incline_percent FROM workout_sets WHERE user_id = ? AND workout_session_id <> ? ORDER BY completed_at DESC").bind(userId, session.id).all<LastSetMetricRow>(),
   ]);
-  const lastLoads = new Map<string, LastLoadRow>();
-  for (const row of lastLoadResult.results) if (!lastLoads.has(row.exercise_id)) lastLoads.set(row.exercise_id, row);
+  const lastLoads = new Map<string, LastSetMetricRow>();
+  const lastInclineWalkMetrics = new Map<string, LastSetMetricRow>();
+  for (const row of lastMetricResult.results) {
+    if (row.tracking_type === "weight_reps" && !lastLoads.has(row.exercise_id)) lastLoads.set(row.exercise_id, row);
+    if (isInclineWalkExercise(row.exercise_id) && row.speed_kmh !== null && row.incline_percent !== null && !lastInclineWalkMetrics.has(row.exercise_id)) {
+      lastInclineWalkMetrics.set(row.exercise_id, row);
+    }
+  }
 
   const exercises: WorkoutExercise[] = exerciseResult.results
     .filter((row) => !row.removed_from_plan_at)
     .map((row) => {
       const lastLoad = lastLoads.get(row.exercise_id);
+      const lastInclineWalkMetric = lastInclineWalkMetrics.get(row.exercise_id);
       return {
         id: row.id,
         planExerciseId: row.plan_exercise_id,
@@ -123,7 +143,7 @@ async function readWorkout(userId: string, session: SessionRow): Promise<ActiveW
         maxReps: row.max_reps,
         minDurationSeconds: row.min_duration_seconds,
         maxDurationSeconds: row.max_duration_seconds,
-        restSeconds: row.rest_seconds,
+        restSeconds: restSecondsForSets(row.max_sets),
         speedMin: row.speed_min,
         speedMax: row.speed_max,
         notes: row.notes,
@@ -138,6 +158,8 @@ async function readWorkout(userId: string, session: SessionRow): Promise<ActiveW
         lastWeightKg: lastLoad?.weight_kg ?? 0,
         lastLeftWeightKg: lastLoad?.left_weight_kg ?? null,
         lastRightWeightKg: lastLoad?.right_weight_kg ?? null,
+        lastSpeedKmh: lastInclineWalkMetric?.speed_kmh ?? null,
+        lastInclinePercent: lastInclineWalkMetric?.incline_percent ?? null,
       };
     });
 
@@ -250,8 +272,7 @@ export async function reconcileTodayPlanWorkout(userId: string, plan: TrainingPl
     `SELECT ${sessionSelection} FROM workout_sessions WHERE id = ? AND user_id = ?`,
   ).bind(workout.id, userId).first<SessionRow>();
   if (!session || session.finalized_at) return { status: "not_started", workout: null };
-  const day = plan.days.find((item) => item.id === session.plan_day_id)
-    ?? plan.days.find((item) => item.weekday === shanghaiWeekday(now));
+  const day = plan.days.find((item) => item.weekday === shanghaiWeekday(now));
   const planExercises = day?.enabled ? day.exercises : [];
   let snapshots = await database.prepare(
     `SELECT workout_exercises.*, COUNT(workout_sets.id) AS set_count
