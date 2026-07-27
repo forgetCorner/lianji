@@ -167,6 +167,29 @@ async function readPlan(userId: string, row: PlanRow): Promise<TrainingPlan> {
   };
 }
 
+function enabledWeekdays(plan: TrainingPlan): number[] {
+  return plan.days
+    .filter((day) => day.enabled && day.exercises.length > 0)
+    .map((day) => day.weekday)
+    .sort((left, right) => left - right);
+}
+
+async function ensurePlanScheduleRevision(userId: string, plan: TrainingPlan): Promise<void> {
+  const database = getD1();
+  await database.prepare(
+    `INSERT OR IGNORE INTO training_plan_schedule_revisions
+     (id, user_id, plan_id, plan_version, effective_at, enabled_weekdays)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    crypto.randomUUID(),
+    userId,
+    plan.id,
+    plan.version,
+    plan.updatedAt,
+    JSON.stringify(enabledWeekdays(plan)),
+  ).run();
+}
+
 async function createDefaultPlan(userId: string): Promise<PlanRow> {
   const database = getD1();
   const now = Date.now();
@@ -202,7 +225,9 @@ export async function getActivePlan(userId: string): Promise<TrainingPlan> {
     "SELECT id, name, version, updated_at FROM training_plans WHERE user_id = ? AND is_active = 1 ORDER BY updated_at DESC LIMIT 1",
   ).bind(userId).first<PlanRow>();
   if (!row) row = await createDefaultPlan(userId);
-  return readPlan(userId, row);
+  const plan = await readPlan(userId, row);
+  await ensurePlanScheduleRevision(userId, plan);
+  return plan;
 }
 
 export async function replaceActivePlan(userId: string, input: TrainingPlan): Promise<TrainingPlan | null> {
@@ -318,8 +343,27 @@ export async function replaceActivePlan(userId: string, input: TrainingPlan): Pr
   statements.push(database.prepare(
     "UPDATE training_plans SET name = ?, version = ?, updated_at = ? WHERE id = ? AND user_id = ? AND version = ?",
   ).bind(input.name, nextVersion, now, input.id, userId, existing.version));
+  const planUpdateIndex = statements.length - 1;
+  statements.push(database.prepare(
+    `INSERT INTO training_plan_schedule_revisions
+     (id, user_id, plan_id, plan_version, effective_at, enabled_weekdays)
+     SELECT ?, ?, ?, ?, ?, ?
+     WHERE EXISTS (
+       SELECT 1 FROM training_plans WHERE id = ? AND user_id = ? AND version = ?
+     )`,
+  ).bind(
+    crypto.randomUUID(),
+    userId,
+    input.id,
+    nextVersion,
+    now,
+    JSON.stringify(enabledWeekdays(input)),
+    input.id,
+    userId,
+    nextVersion,
+  ));
   const results = await database.batch(statements);
-  const planUpdate = results.at(-1);
+  const planUpdate = results[planUpdateIndex];
   if (!planUpdate?.success || Number(planUpdate.meta?.changes ?? 0) !== 1) return null;
   return readPlan(userId, { id: input.id, name: input.name, version: nextVersion, updated_at: now });
 }

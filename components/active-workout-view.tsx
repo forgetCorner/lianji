@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Check, Minus, Plus, SkipForward } from "lucide-react";
+import { ArrowLeft, Check, ListEnd, ListMinus, ListX, Minus, Plus } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { isInclineWalkExercise, type ActiveWorkout, type WorkoutExercise } from "@/lib/training";
@@ -27,11 +27,11 @@ type Props = {
   error: string | null;
   onBack: () => void;
   onSaveSet: (input: SetInput) => void;
-  onSkip: () => void;
+  onFinishExercise: (skipped: boolean) => void;
 };
 
 function adjustedMetricValue(value: number, step: number, direction: -1 | 1, min: number, max = Number.POSITIVE_INFINITY): number {
-  const precision = step < 1 ? 1 : 0;
+  const precision = Math.max(0, (String(step).split(".")[1] ?? "").length);
   return Number(Math.min(max, Math.max(min, value + step * direction)).toFixed(precision));
 }
 
@@ -111,9 +111,13 @@ function WorkoutExercisePanel({ workout, exercise, saving, error, onSaveSet }: P
   );
 }
 
-export function ActiveWorkoutView({ workout, exercise, saving, error, onBack, onSaveSet, onSkip }: Props) {
+export function ActiveWorkoutView({ workout, exercise, saving, error, onBack, onSaveSet, onFinishExercise }: Props) {
   const sequenceRef = useRef<HTMLDivElement>(null);
   const [elapsed, setElapsed] = useState(() => Math.max(0, workout.durationSeconds + (workout.resumedAt ? Math.round((Date.now() - workout.resumedAt) / 1000) : 0)));
+  const reachedMinimumSets = exercise.sets.length >= exercise.minSets;
+  const hasCompletedSets = exercise.sets.length > 0;
+  const finishExerciseLabel = reachedMinimumSets ? "下一项" : hasCompletedSets ? "跳过剩余组" : "跳过此动作";
+  const FinishExerciseIcon = reachedMinimumSets ? ListEnd : hasCompletedSets ? ListMinus : ListX;
   useEffect(() => {
     const updateElapsed = () => setElapsed(Math.max(0, workout.durationSeconds + (workout.resumedAt ? Math.round((Date.now() - workout.resumedAt) / 1000) : 0)));
     updateElapsed();
@@ -135,7 +139,7 @@ export function ActiveWorkoutView({ workout, exercise, saving, error, onBack, on
         <header className="workout-header">
           <button onClick={onBack} aria-label="返回今日训练"><ArrowLeft /></button>
           <div><span>{workout.planName} · 已同步</span><strong>{elapsedLabel}</strong></div>
-          <button className="skip-exercise" onClick={onSkip} disabled={saving}><SkipForward size={17} /><span>跳过</span></button>
+          <button className="skip-exercise" onClick={() => onFinishExercise(!reachedMinimumSets)} disabled={saving}><FinishExerciseIcon size={17} /><span>{finishExerciseLabel}</span></button>
         </header>
 
         <div ref={sequenceRef} className="workout-sequence" aria-label="训练动作进度">
@@ -167,7 +171,7 @@ export function WorkoutRestOverlay({ exercise, completedSet, onContinue, onFinis
           <strong><span>第 {completedSet} 组</span><i aria-hidden="true">·</i>已完成</strong>
           <small>{canFinish ? "已达到最低组数，可结束动作" : "放慢呼吸，准备下一组"}</small>
         </div>
-        {canFinish && <button className="text-action rest-next-action" onClick={onFinish}><SkipForward size={15} />下一项</button>}
+        {canFinish && <button className="text-action rest-next-action" onClick={onFinish}><ListEnd size={15} />下一项</button>}
       </div>
       <div className="timer-ring"><div className="rest-energy-orbit" aria-hidden="true"><i /><i /></div><strong>{time}</strong><span>休息 / {exercise.restSeconds} 秒</span><KineticIcon kind="recovery" active size={24} /></div>
       <div className="next-set"><span>下一组</span><h2>{exercise.name} · 第 {completedSet + 1} 组</h2><strong>{canFinish ? "加做一组，或者进入下个动作" : "保持刚才的动作质量"}</strong><p>计划范围 {exercise.minSets}–{exercise.maxSets} 组</p><div className="next-progress" style={{ gridTemplateColumns: `repeat(${exercise.maxSets}, minmax(0, 1fr))` }}>{Array.from({ length: exercise.maxSets }, (_, index) => <i key={index} className={index < completedSet ? "done" : index === completedSet ? "current" : ""} />)}</div></div>

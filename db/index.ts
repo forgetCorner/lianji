@@ -77,6 +77,16 @@ const schemaStatements = [
     updated_at INTEGER NOT NULL
   )`,
   "CREATE INDEX IF NOT EXISTS training_plans_user_active_idx ON training_plans (user_id, is_active)",
+  `CREATE TABLE IF NOT EXISTS training_plan_schedule_revisions (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    plan_id TEXT NOT NULL REFERENCES training_plans(id) ON DELETE CASCADE,
+    plan_version INTEGER NOT NULL,
+    effective_at INTEGER NOT NULL,
+    enabled_weekdays TEXT DEFAULT '[]' NOT NULL
+  )`,
+  "CREATE UNIQUE INDEX IF NOT EXISTS training_plan_schedule_revisions_plan_version_unique ON training_plan_schedule_revisions (plan_id, plan_version)",
+  "CREATE INDEX IF NOT EXISTS training_plan_schedule_revisions_user_effective_idx ON training_plan_schedule_revisions (user_id, effective_at)",
   `CREATE TABLE IF NOT EXISTS training_plan_days (
     id TEXT PRIMARY KEY NOT NULL,
     plan_id TEXT NOT NULL REFERENCES training_plans(id) ON DELETE CASCADE,

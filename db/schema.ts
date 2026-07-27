@@ -119,6 +119,22 @@ export const trainingPlans = sqliteTable(
   (table) => [index("training_plans_user_active_idx").on(table.userId, table.isActive)],
 );
 
+export const trainingPlanScheduleRevisions = sqliteTable(
+  "training_plan_schedule_revisions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    planId: text("plan_id").notNull().references(() => trainingPlans.id, { onDelete: "cascade" }),
+    planVersion: integer("plan_version").notNull(),
+    effectiveAt: integer("effective_at").notNull(),
+    enabledWeekdays: text("enabled_weekdays").notNull().default("[]"),
+  },
+  (table) => [
+    uniqueIndex("training_plan_schedule_revisions_plan_version_unique").on(table.planId, table.planVersion),
+    index("training_plan_schedule_revisions_user_effective_idx").on(table.userId, table.effectiveAt),
+  ],
+);
+
 export const trainingPlanDays = sqliteTable(
   "training_plan_days",
   {

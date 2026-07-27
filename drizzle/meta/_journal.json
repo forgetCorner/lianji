@@ -29,6 +29,13 @@
       "when": 1784781732978,
       "tag": "0003_nosy_dreaming_celestial",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785143240401,
+      "tag": "0004_chubby_echo",
+      "breakpoints": true
     }
   ]
 }

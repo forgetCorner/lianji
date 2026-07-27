@@ -6,8 +6,9 @@ const root = new URL("../", import.meta.url);
 
 test("生产构建包含练迹页面与真实数据 API", async () => {
   await access(new URL("dist/server/index.js", root));
-  const [page, styles, hosting, visuals, bootSequence, kineticField, pageTransition, planTransition, kineticScene, kineticShaders, kineticIcons, trackSelect, trainingPlan, trainingDayStatus, packageJson, favicon] = await Promise.all([
+  const [page, layout, styles, hosting, visuals, bootSequence, kineticField, pageTransition, planTransition, kineticScene, kineticShaders, kineticIcons, trackSelect, trainingPlan, trainingDayStatus, packageJson, favicon] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/layout.tsx", root), "utf8"),
     readFile(new URL("app/globals.css", root), "utf8"),
     readFile(new URL(".openai/hosting.json", root), "utf8"),
     readFile(new URL("components/track-visuals.tsx", root), "utf8"),
@@ -31,11 +32,38 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(page, /TrainingPlanView/);
   assert.match(page, /\/api\/plans\/active/);
   assert.match(page, /\/api\/workouts\/active/);
-  assert.match(page, /aria-label="训练频率时间范围"/);
-  assert.match(page, /selectedActivity\.reduce/);
+  assert.match(page, /ariaLabel="选择训练年份"/);
+  assert.match(page, /className="profile-global-stats"/);
+  assert.match(page, /<Crown aria-hidden="true"/);
+  assert.match(page, /<Medal aria-hidden="true"/);
+  assert.match(page, /<Award aria-hidden="true"/);
+  assert.match(page, /className="rank-position"/);
+  assert.match(styles, /\.rank-row \{[^}]+align-items: start/);
+  assert.match(styles, /\.rank-row \{ min-height: 72px/);
+  assert.match(styles, /\.ranking-layout > \.leaderboard \.rank-row \{ min-height: 72px/);
+  assert.match(styles, /\.rank-position \{[^}]+height: 16px[^}]+align-self: start/);
+  assert.match(styles, /\.rank-copy > strong \{[^}]+line-height: 16px/);
+  assert.match(styles, /\.rank-status \{[^}]+top: 0[^}]+font: 700 12px\/16px/);
+  assert.match(styles, /\.rank-copy > strong \{[^}]+color: var\(--text\)/);
+  assert.match(styles, /\.rank-row\.rank-1 \.rank-position svg,[^}]+\.rank-row\.rank-1 \.rank-copy > strong[^}]+color: var\(--lime\)/);
+  assert.match(styles, /\.rank-row\.rank-2 \.rank-position svg,[^}]+\.rank-row\.rank-2 \.rank-copy > strong[^}]+color: var\(--orange\)/);
+  assert.match(styles, /\.rank-row\.rank-3 \.rank-position svg,[^}]+\.rank-row\.rank-3 \.rank-copy > strong[^}]+color: var\(--blue\)/);
+  assert.match(styles, /\.rank-row\.rank-default \.rank-position b,[^}]+\.rank-row\.rank-default \.rank-status \{ color: var\(--text\)/);
+  assert.match(styles, /\.rank-row\.rank-default \.rank-track i \{ background: var\(--text\)/);
+  assert.match(styles, /\.leaderboard \.section-heading > span \{ color: var\(--lime\)/);
+  assert.match(layout, /<html lang="zh-CN" className=\{`\$\{notoSans\.variable\} \$\{robotoMono\.variable\}`\}>/);
+  assert.doesNotMatch(layout, /Saira_Condensed/);
+  assert.match(styles, /--font-mono: var\(--font-roboto-mono\)/);
+  assert.match(styles, /body \{[^}]+font-family: var\(--font-data\)/);
+  assert.match(styles, /\.profile-global-stats strong \{[^}]+font: 700 31px\/\.95 var\(--font-mono\)/);
+  assert.match(styles, /\.profile-global-stats > div:nth-child\(1\) strong \{ color: var\(--lime\)/);
+  assert.match(styles, /\.profile-global-stats > div:nth-child\(2\) strong \{ color: var\(--orange\)/);
+  assert.match(styles, /\.profile-global-stats > div:nth-child\(3\) strong \{ color: var\(--blue\)/);
+  assert.match(page, /className="heatmap-scroll"/);
+  assert.match(page, /可横向拖动查看/);
   assert.match(page, /const chineseMonths = \["一月".+"十二月"\]/);
-  assert.match(page, /period === "year" \? startOfCalendarYear/);
-  assert.match(page, /12 月 31 日/);
+  assert.doesNotMatch(page, /训练频率时间范围/);
+  assert.doesNotMatch(page, /frequencyPeriods/);
   assert.match(page, /data-testid="profile-view"/);
   assert.match(page, /个人档案与账号设置/);
   assert.doesNotMatch(page, /HistoryView/);
@@ -73,6 +101,15 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(styles, /data-profile-header-condensed="true"\] \.profile-compact-bar \{ pointer-events: auto/);
   assert.match(styles, /data-plan-header-condensed="true"\] \.plan-compact-context \{ pointer-events: auto/);
   assert.match(styles, /\.plan-compact-weekdays button\.active\.enabled i \{ background: var\(--lime\)/);
+  assert.match(styles, /\.day-status-control\.is-compact \.day-status-action \{ min-height: 32px/);
+  assert.match(styles, /\.day-status-control\.is-compact \.day-status-label \{ line-height: 20px/);
+  assert.match(planTransition, /targetDayStatus\.height\) \/ 2;/);
+  assert.match(styles, /\.plan-compact-context \{ height: 40px/);
+  assert.match(styles, /\.plan-compact-weekdays \{[^}]+margin-top: -4px/);
+  assert.match(styles, /\.plan-compact-weekdays button span \{ font: 700 13px\/1 var\(--font-mono\)/);
+  assert.match(styles, /\.week-rail > button > b \{ font-size: 13px/);
+  assert.match(styles, /\.plan-page-header \{ min-height: 118px; padding: 2px 0 12px/);
+  assert.match(styles, /\.plan-page-header h1 \{ margin-top: 10px/);
   assert.match(styles, /\.plan-compact-status \{[^}]+var\(--plan-header-collapse\) - \.12/);
   assert.match(styles, /touch-action: manipulation/);
   assert.match(styles, /\.week-rail \{ touch-action: pan-y/);
@@ -308,6 +345,7 @@ test("计划页只编辑训练目标并统一休息规则", async () => {
   assert.match(page, /setResting\(\{ exercise: updatedExercise, completedSet: updatedExercise\.sets\.length \}\)/);
   assert.match(styles, /\.exercise-config-row \{[^}]+grid-template-columns: minmax\(0, 1fr\) minmax\(160px, 220px\)/);
   assert.match(styles, /\.target-editor \{[^}]+grid-template-columns: repeat\(4, minmax\(82px, 1fr\)\)/);
+  assert.match(styles, /\.target-editor input \{ font-size: 16px; font-weight: 600/);
 });
 
 test("备选动作入口暂时隐藏但保留数据能力", async () => {
@@ -336,6 +374,31 @@ test("计划数字输入允许清空重输且不会在聚焦时强制全选", as
   assert.match(trainingPlan, /if \(rawValue === ""\) return/);
   assert.match(trainingPlan, /targetDrafts\[targetDraftKey\(exercise\.id, "minReps"\)\]/);
   assert.match(trainingPlan, /targetDrafts\[targetDraftKey\(exercise\.id, "minDurationSeconds"\)\]/);
+});
+
+test("训练统计使用全历史数据和计划版本口径", async () => {
+  const [database, schema, plans, dashboard, page, styles] = await Promise.all([
+    readFile(new URL("db/index.ts", root), "utf8"),
+    readFile(new URL("db/schema.ts", root), "utf8"),
+    readFile(new URL("lib/server/plans.ts", root), "utf8"),
+    readFile(new URL("lib/server/dashboard.ts", root), "utf8"),
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
+  ]);
+
+  assert.match(database, /CREATE TABLE IF NOT EXISTS training_plan_schedule_revisions/);
+  assert.match(schema, /export const trainingPlanScheduleRevisions/);
+  assert.match(plans, /ensurePlanScheduleRevision/);
+  assert.match(plans, /enabledWeekdays\(input\)/);
+  assert.match(dashboard, /calculateScheduledTrainingStreak/);
+  assert.match(dashboard, /scheduledStreak: calculateScheduledTrainingStreak/);
+  assert.match(dashboard, /countActiveWeeks/);
+  assert.doesNotMatch(dashboard, /workout_sessions\.started_at >= \?/);
+  assert.match(page, /全部历史训练统计/);
+  assert.match(page, /按计划训练机会/);
+  assert.match(page, /selectedFrequencyActivity\.volumeKg/);
+  assert.match(styles, /\.heatmap-scroll \{[^}]+overflow-x: auto/);
+  assert.match(styles, /\.heatmap-year-canvas \{[^}]+--heatmap-cell: 16px/);
 });
 
 test("保存周计划后恢复保存前选中的星期", async () => {

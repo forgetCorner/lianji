@@ -2,6 +2,7 @@ import { ensureDatabase, getD1 } from "@/db";
 import type { AuthUser } from "@/lib/server/auth";
 import { getActivePlan, shanghaiWeekday } from "@/lib/server/plans";
 import { finalizeExpiredPlanWorkouts } from "@/lib/server/workouts";
+import { calculateScheduledTrainingStreak, countActiveWeeks } from "@/lib/training-summary-domain";
 
 type SessionRow = {
   id: string;
@@ -13,6 +14,8 @@ type SessionRow = {
   set_count: number;
   volume_kg: number;
   plan_day_id: string | null;
+  training_date: string | null;
+  workout_type: string;
 };
 
 type SetRow = {
@@ -25,6 +28,10 @@ type SetRow = {
 };
 
 type UserRow = { id: string; display_name: string };
+type ScheduleRevisionRow = {
+  effective_at: number;
+  enabled_weekdays: string;
+};
 
 const shanghaiDateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Shanghai",
@@ -45,18 +52,6 @@ function startOfShanghaiWeek(now: number): number {
   const today = dateToUtcDay(dateKey(now));
   const day = new Date(today).getUTCDay() || 7;
   return today - (day - 1) * 24 * 60 * 60 * 1000 - 8 * 60 * 60 * 1000;
-}
-
-function calculateStreak(sessions: SessionRow[], now: number): number {
-  const activeDays = new Set(sessions.filter((session) => session.completed_at).map((session) => dateKey(session.completed_at!)));
-  let cursor = dateToUtcDay(dateKey(now));
-  if (!activeDays.has(dateKey(now))) cursor -= 24 * 60 * 60 * 1000;
-  let streak = 0;
-  while (activeDays.has(shanghaiDateFormatter.format(new Date(cursor)))) {
-    streak += 1;
-    cursor -= 24 * 60 * 60 * 1000;
-  }
-  return streak;
 }
 
 function weekKey(timestamp: number): string {
@@ -110,15 +105,16 @@ export async function buildDashboard(user: AuthUser) {
   const now = Date.now();
   const yearAgo = now - 366 * 24 * 60 * 60 * 1000;
   const fiftySixDaysAgo = now - 56 * 24 * 60 * 60 * 1000;
-  const [sessionResult, currentSetResult, rankingSetResult, userResult] = await Promise.all([
+  const [sessionResult, currentSetResult, rankingSetResult, userResult, scheduleRevisionResult] = await Promise.all([
     database.prepare(
       `SELECT workout_sessions.id, workout_sessions.user_id, workout_sessions.plan_name, workout_sessions.started_at,
         workout_sessions.completed_at, workout_sessions.duration_seconds, COUNT(workout_sets.id) AS set_count,
-        COALESCE(SUM(workout_sets.weight_kg * workout_sets.reps), 0) AS volume_kg, workout_sessions.plan_day_id
+        COALESCE(SUM(workout_sets.weight_kg * workout_sets.reps), 0) AS volume_kg, workout_sessions.plan_day_id,
+        workout_sessions.training_date, workout_sessions.workout_type
        FROM workout_sessions LEFT JOIN workout_sets ON workout_sets.workout_session_id = workout_sessions.id
-       WHERE workout_sessions.user_id = ? AND workout_sessions.started_at >= ?
+       WHERE workout_sessions.user_id = ?
        GROUP BY workout_sessions.id ORDER BY workout_sessions.started_at DESC`,
-    ).bind(user.id, yearAgo).all<SessionRow>(),
+    ).bind(user.id).all<SessionRow>(),
     database.prepare(
       "SELECT user_id, exercise_id, exercise_name, weight_kg, reps, completed_at FROM workout_sets WHERE user_id = ? AND completed_at >= ? AND tracking_type = 'weight_reps' AND weight_kg > 0 AND reps > 0 ORDER BY completed_at",
     ).bind(user.id, yearAgo).all<SetRow>(),
@@ -126,6 +122,12 @@ export async function buildDashboard(user: AuthUser) {
       "SELECT user_id, exercise_id, exercise_name, weight_kg, reps, completed_at FROM workout_sets WHERE completed_at >= ? AND tracking_type = 'weight_reps' AND weight_kg > 0 AND reps > 0",
     ).bind(fiftySixDaysAgo).all<SetRow>(),
     database.prepare("SELECT id, display_name FROM users ORDER BY created_at").all<UserRow>(),
+    database.prepare(
+      `SELECT effective_at, enabled_weekdays
+       FROM training_plan_schedule_revisions
+       WHERE user_id = ?
+       ORDER BY effective_at, plan_version`,
+    ).bind(user.id).all<ScheduleRevisionRow>(),
   ]);
 
   const sessions = sessionResult.results;
@@ -133,11 +135,29 @@ export async function buildDashboard(user: AuthUser) {
   const completedSessions = sessions.filter((session) => session.completed_at);
   const weekStart = startOfShanghaiWeek(now);
   const weeklyCount = new Set(completedSessions.filter((session) => session.completed_at! >= weekStart).map((session) => session.plan_day_id ?? session.id)).size;
-  const activity = new Map<string, number>();
+  const completedDates = completedSessions.map((session) => session.training_date ?? dateKey(session.completed_at!));
+  const completedPlanDates = completedSessions
+    .filter((session) => session.workout_type === "plan")
+    .map((session) => session.training_date ?? dateKey(session.completed_at!));
+  const activity = new Map<string, { count: number; volumeKg: number; planNames: string[] }>();
   for (const session of completedSessions) {
-    const key = dateKey(session.completed_at!);
-    activity.set(key, (activity.get(key) ?? 0) + 1);
+    const key = session.training_date ?? dateKey(session.completed_at!);
+    const current = activity.get(key) ?? { count: 0, volumeKg: 0, planNames: [] };
+    current.count += 1;
+    current.volumeKg += session.volume_kg;
+    if (!current.planNames.includes(session.plan_name)) current.planNames.push(session.plan_name);
+    activity.set(key, current);
   }
+  const scheduleRevisions = scheduleRevisionResult.results.map((revision) => {
+    let enabledWeekdays: number[] = [];
+    try {
+      const parsed = JSON.parse(revision.enabled_weekdays);
+      if (Array.isArray(parsed)) enabledWeekdays = parsed.filter((value): value is number => Number.isInteger(value));
+    } catch {
+      enabledWeekdays = [];
+    }
+    return { effectiveAt: revision.effective_at, enabledWeekdays };
+  });
 
   const trendExercise = sets.at(-1)?.exercise_id ?? null;
   const trendName = sets.at(-1)?.exercise_name ?? null;
@@ -155,11 +175,19 @@ export async function buildDashboard(user: AuthUser) {
     summary: {
       weeklyCount,
       weeklyTarget: plan.days.filter((day) => day.enabled && day.exercises.length > 0).length,
-      streak: calculateStreak(completedSessions, now),
+      scheduledStreak: calculateScheduledTrainingStreak({ revisions: scheduleRevisions, completedDates: completedPlanDates, now }),
       totalWorkouts: completedSessions.length,
+      activeWeeks: countActiveWeeks(completedDates),
     },
     lastSession: completedSessions[0] ?? null,
-    activity: [...activity.entries()].map(([date, count]) => ({ date, count })),
+    activity: [...activity.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([date, entry]) => ({
+        date,
+        count: entry.count,
+        volumeKg: Math.round(entry.volumeKg * 10) / 10,
+        planNames: entry.planNames,
+      })),
     recentWorkouts: completedSessions.slice(0, 20),
     trend: {
       exerciseId: trendExercise,

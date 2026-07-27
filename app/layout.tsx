@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Noto_Sans_SC, Roboto_Mono, Saira_Condensed } from "next/font/google";
+import { Noto_Sans_SC, Roboto_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
 
@@ -11,13 +11,6 @@ const notoSans = Noto_Sans_SC({
 
 const robotoMono = Roboto_Mono({
   variable: "--font-roboto-mono",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const sairaCondensed = Saira_Condensed({
-  variable: "--font-saira-condensed",
-  weight: "600",
   subsets: ["latin"],
   display: "swap",
 });
@@ -43,5 +36,5 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="zh-CN"><body className={`${notoSans.variable} ${robotoMono.variable} ${sairaCondensed.variable}`}>{children}</body></html>;
+  return <html lang="zh-CN" className={`${notoSans.variable} ${robotoMono.variable}`}><body>{children}</body></html>;
 }

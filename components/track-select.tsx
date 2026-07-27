@@ -72,12 +72,13 @@ function popupStyle(position: PopupPosition): CSSProperties {
   return { top: position.top, left: position.left, width: position.width };
 }
 
-export function TrackSelect<T extends string>({ ariaLabel, value, options, onChange, disabled = false }: {
+export function TrackSelect<T extends string>({ ariaLabel, value, options, onChange, disabled = false, popupMinWidth = 180 }: {
   ariaLabel: string;
   value: T;
   options: SelectOption<T>[];
   onChange: (value: T) => void;
   disabled?: boolean;
+  popupMinWidth?: number;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -86,7 +87,7 @@ export function TrackSelect<T extends string>({ ariaLabel, value, options, onCha
   const reduceMotion = useReducedMotion();
   const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value));
   const [activeIndex, setActiveIndex] = useState(selectedIndex);
-  const position = useAnchoredPosition(open, triggerRef, 180, Math.min(280, options.length * 42 + 16));
+  const position = useAnchoredPosition(open, triggerRef, popupMinWidth, Math.min(280, options.length * 42 + 16));
   const close = useCallback(() => {
     setOpen(false);
     requestAnimationFrame(() => triggerRef.current?.focus());

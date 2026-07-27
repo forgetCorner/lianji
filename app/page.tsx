@@ -2,16 +2,19 @@
 
 import {
   Activity,
+  Award,
   Check,
   ChevronDown,
   CircleAlert,
+  Crown,
   History,
+  Medal,
   Settings,
   Trophy,
   UserRound,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import {
   CartesianGrid,
   Line,
@@ -36,9 +39,9 @@ import { KineticIcon } from "@/components/kinetic-icons";
 import { KineticPageTransition } from "@/components/kinetic-page-transition";
 import { TodaySharedTransition } from "@/components/today-shared-transition";
 import { ProfileSharedTransition } from "@/components/profile-shared-transition";
+import { TrackSelect } from "@/components/track-select";
 
 type View = "today" | "plan" | "ranking" | "profile" | "workout";
-type FrequencyPeriod = "year" | "12w" | "4w";
 type ExerciseSelections = Record<string, "primary" | "alternative">;
 const menuViews: View[] = ["today", "plan", "ranking", "profile"];
 
@@ -65,9 +68,9 @@ type DashboardData = {
   user: AuthUser;
   plan: TrainingPlan;
   todayPlan: TrainingDay | null;
-  summary: { weeklyCount: number; weeklyTarget: number; streak: number; totalWorkouts: number };
+  summary: { weeklyCount: number; weeklyTarget: number; scheduledStreak: number; totalWorkouts: number; activeWeeks: number };
   lastSession: WorkoutSummary | null;
-  activity: { date: string; count: number }[];
+  activity: { date: string; count: number; volumeKg: number; planNames: string[] }[];
   recentWorkouts: WorkoutSummary[];
   trend: { exerciseId: string | null; exerciseName: string | null; points: { date: string; value: number }[] };
   leaderboard: LeaderboardEntry[];
@@ -99,39 +102,10 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 }).format(value);
 }
 
-const frequencyPeriods: { id: FrequencyPeriod; label: string; weeks: number }[] = [
-  { id: "year", label: "年度", weeks: 52 },
-  { id: "12w", label: "12 周", weeks: 12 },
-  { id: "4w", label: "4 周", weeks: 4 },
-];
-
 const chineseMonths = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"];
 
 function toDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function startOfFrequencyRange(timestamp: number, weeks: number): Date {
-  const end = new Date(timestamp);
-  end.setHours(0, 0, 0, 0);
-  const mondayOffset = (end.getDay() || 7) - 1;
-  const start = new Date(end);
-  start.setDate(start.getDate() - mondayOffset - (weeks - 1) * 7);
-  return start;
-}
-
-function startOfCalendarYear(timestamp: number): Date {
-  const date = new Date(timestamp);
-  return new Date(date.getFullYear(), 0, 1);
-}
-
-function endOfCalendarYear(timestamp: number): Date {
-  const date = new Date(timestamp);
-  return new Date(date.getFullYear(), 11, 31);
-}
-
-function formatShortDate(date: Date): string {
-  return `${date.getMonth() + 1}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function Brand() {
@@ -231,7 +205,7 @@ function TodayView({ dashboard, activeWorkout, scrollerRef, selections, setSelec
             <div className="plan-copy">
               <div className="plan-kicker-row">
                 <span>{plan ? "今日计划" : "恢复日"}</span>
-                <div className="plan-streak"><KineticIcon kind="streak" active size={17} /><strong>{dashboard.summary.streak}</strong><span>连续训练日</span></div>
+                <div className="plan-streak"><KineticIcon kind="streak" active size={17} /><strong>{dashboard.summary.scheduledStreak}</strong><span>连续完成</span></div>
               </div>
               <h2><span ref={sourceTitleRef}>{planName}</span></h2>
               <p>{plan ? `${plan.focus} · ${plan.exercises.length} 个动作` : "今天没有安排计划训练，让身体恢复，为下一次训练做好准备。"}</p>
@@ -284,62 +258,156 @@ function TodayView({ dashboard, activeWorkout, scrollerRef, selections, setSelec
   );
 }
 
-function Heatmap({ activity, period, syncedAt }: { activity: DashboardData["activity"]; period: FrequencyPeriod; syncedAt: number }) {
-  const config = frequencyPeriods.find((item) => item.id === period) ?? frequencyPeriods[0];
-  const { cells, monthLabels, rangeLabel, columnCount } = useMemo(() => {
+function Heatmap({
+  activity,
+  year,
+  syncedAt,
+  selectedDate,
+  onSelectDate,
+}: {
+  activity: DashboardData["activity"];
+  year: number;
+  syncedAt: number;
+  selectedDate: string | null;
+  onSelectDate: (date: string) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const referenceNowRef = useRef(syncedAt);
+  const suppressClickRef = useRef(false);
+  const dragRef = useRef({ pointerId: -1, startX: 0, scrollLeft: 0, dragged: false });
+  const { cells, monthLabels, columnCount } = useMemo(() => {
     const counts = new Map(activity.map((entry) => [entry.date, entry.count]));
     const today = new Date(syncedAt);
     today.setHours(23, 59, 59, 999);
-
-    if (period === "year") {
-      const start = startOfCalendarYear(syncedAt);
-      const end = endOfCalendarYear(syncedAt);
-      const leadingDays = (start.getDay() || 7) - 1;
-      const nextCells = Array.from({ length: leadingDays }, (_, index) => ({ key: `leading-${index}`, date: "", count: 0, level: 0, future: false, empty: true }));
-      for (const date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
-        const key = toDateKey(date);
-        const count = counts.get(key) ?? 0;
-        nextCells.push({ key, date: key, count, level: Math.min(3, count), future: date > today, empty: false });
-      }
-      const labels = chineseMonths.map((label, month) => {
-        const monthStart = new Date(start.getFullYear(), month, 1);
-        const elapsedDays = Math.round((Date.UTC(monthStart.getFullYear(), monthStart.getMonth(), monthStart.getDate()) - Date.UTC(start.getFullYear(), 0, 1)) / 86_400_000);
-        return { label, column: Math.floor((leadingDays + elapsedDays) / 7) + 1 };
-      });
-      return {
-        cells: nextCells,
-        monthLabels: labels,
-        rangeLabel: `${start.getFullYear()} 年 1 月 1 日 — 12 月 31 日`,
-        columnCount: Math.ceil(nextCells.length / 7),
-      };
-    }
-
-    const start = startOfFrequencyRange(syncedAt, config.weeks);
-    const nextCells = Array.from({ length: config.weeks * 7 }, (_, index) => {
-      const date = new Date(start);
-      date.setDate(start.getDate() + index);
+    const start = new Date(year, 0, 1);
+    const end = new Date(year, 11, 31);
+    const leadingDays = (start.getDay() || 7) - 1;
+    const nextCells = Array.from({ length: leadingDays }, (_, index) => ({
+      key: `leading-${index}`,
+      date: "",
+      count: 0,
+      level: 0,
+      future: false,
+      empty: true,
+    }));
+    for (const date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
       const key = toDateKey(date);
       const count = counts.get(key) ?? 0;
-      return { key, date: key, count, level: Math.min(3, count), future: date > today, empty: false };
+      nextCells.push({ key, date: key, count, level: Math.min(3, count), future: date > today, empty: false });
+    }
+    const labels = chineseMonths.map((label, month) => {
+      const elapsedDays = Math.round((Date.UTC(year, month, 1) - Date.UTC(year, 0, 1)) / 86_400_000);
+      return { label, column: Math.floor((leadingDays + elapsedDays) / 7) + 1 };
     });
     return {
       cells: nextCells,
-      monthLabels: [],
-      rangeLabel: `${formatShortDate(start)} — ${formatShortDate(new Date(syncedAt))}`,
-      columnCount: config.weeks,
+      monthLabels: labels,
+      columnCount: Math.ceil(nextCells.length / 7),
     };
-  }, [activity, config.weeks, period, syncedAt]);
+  }, [activity, syncedAt, year]);
+
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const now = new Date(referenceNowRef.current);
+    const targetDate = year === now.getFullYear()
+      ? new Date((new Date(year, Math.max(0, now.getMonth() - 3), now.getDate()).getTime() + now.getTime()) / 2)
+      : new Date(year, 10, 15);
+    const start = new Date(year, 0, 1);
+    const leadingDays = (start.getDay() || 7) - 1;
+    const elapsedDays = Math.max(0, Math.floor((Date.UTC(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate()) - Date.UTC(year, 0, 1)) / 86_400_000));
+    const targetColumn = Math.floor((leadingDays + elapsedDays) / 7);
+    const targetX = targetColumn * 20 + 8;
+    scroller.scrollLeft = Math.max(0, Math.min(scroller.scrollWidth - scroller.clientWidth, targetX - scroller.clientWidth / 2));
+  }, [year]);
+
+  function finishDrag(event: React.PointerEvent<HTMLDivElement>) {
+    if (dragRef.current.pointerId !== event.pointerId) return;
+    suppressClickRef.current = dragRef.current.dragged;
+    dragRef.current.pointerId = -1;
+    event.currentTarget.classList.remove("is-dragging");
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    window.setTimeout(() => {
+      suppressClickRef.current = false;
+    }, 0);
+  }
+
   const gridStyle = { "--heatmap-columns": columnCount } as React.CSSProperties;
   return (
-    <div className="heatmap-visual" data-period={period} style={gridStyle}>
-      {period === "year" ? <div className="heatmap-axis" aria-hidden="true">{monthLabels.map((item) => <span key={`${item.label}-${item.column}`} style={{ gridColumn: item.column }}>{item.label}</span>)}</div> : <div className="heatmap-range-axis"><span>{rangeLabel}</span><b>{config.label}</b></div>}
-      <div className="heatmap" aria-label={`${config.label}训练频率，${rangeLabel}`}>{cells.map((cell) => <i key={cell.key} data-empty={cell.empty || undefined} data-level={cell.level} data-future={cell.future || undefined} title={cell.empty ? undefined : `${cell.date} · ${cell.count} 次训练`} />)}</div>
+    <div
+      ref={scrollRef}
+      className="heatmap-scroll"
+      tabIndex={0}
+      aria-label={`${year} 年训练频率，可横向拖动查看`}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        dragRef.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          scrollLeft: event.currentTarget.scrollLeft,
+          dragged: false,
+        };
+        if (event.pointerType === "mouse") {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          event.currentTarget.classList.add("is-dragging");
+        }
+      }}
+      onPointerMove={(event) => {
+        if (dragRef.current.pointerId !== event.pointerId) return;
+        const distance = event.clientX - dragRef.current.startX;
+        if (Math.abs(distance) > 7) dragRef.current.dragged = true;
+        if (event.pointerType === "mouse" && dragRef.current.dragged) {
+          event.preventDefault();
+          event.currentTarget.scrollLeft = dragRef.current.scrollLeft - distance;
+        }
+      }}
+      onScroll={(event) => {
+        if (
+          dragRef.current.pointerId !== -1
+          && Math.abs(event.currentTarget.scrollLeft - dragRef.current.scrollLeft) > 3
+        ) {
+          dragRef.current.dragged = true;
+        }
+      }}
+      onPointerUp={finishDrag}
+      onPointerCancel={finishDrag}
+      onClickCapture={(event) => {
+        if (!suppressClickRef.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
+      <div className="heatmap-year-canvas" style={gridStyle}>
+        <div className="heatmap-axis" aria-hidden="true">{monthLabels.map((item) => <span key={`${item.label}-${item.column}`} style={{ gridColumn: item.column }}>{item.label}</span>)}</div>
+        <div className="heatmap" aria-label={`${year} 年训练频率`}>
+          {cells.map((cell) => (
+            <button
+              key={cell.key}
+              type="button"
+              className="heatmap-cell"
+              data-empty={cell.empty || undefined}
+              data-level={cell.level}
+              data-future={cell.future || undefined}
+              data-selected={cell.date === selectedDate || undefined}
+              disabled={cell.empty || cell.future || cell.count === 0}
+              aria-label={cell.empty ? undefined : `${cell.date}，${cell.count} 次训练`}
+              aria-pressed={cell.date === selectedDate}
+              title={cell.empty ? undefined : `${cell.date} · ${cell.count} 次训练`}
+              onClick={() => onSelectDate(cell.date)}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
 
 function ProfileView({ dashboard, scrollerRef, accountOpen, onAccount }: { dashboard: DashboardData; scrollerRef: RefObject<HTMLDivElement | null>; accountOpen: boolean; onAccount: () => void }) {
-  const [period, setPeriod] = useState<FrequencyPeriod>("year");
+  const currentYear = new Date(dashboard.syncedAt).getFullYear();
+  const [selectedYear, setSelectedYear] = useState(String(currentYear));
+  const [selectedFrequencyDate, setSelectedFrequencyDate] = useState<string | null>(null);
   const [showRmRule, setShowRmRule] = useState(false);
   const rmRuleRef = useRef<HTMLDivElement>(null);
   const sourceAvatarRef = useRef<HTMLSpanElement>(null);
@@ -350,19 +418,35 @@ function ProfileView({ dashboard, scrollerRef, accountOpen, onAccount }: { dashb
   const targetSettingsRef = useRef<HTMLSpanElement>(null);
   const initials = dashboard.user.displayName.slice(0, 2).toUpperCase();
   const syncLabel = `${new Date(dashboard.syncedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 已同步`;
-  const periodConfig = frequencyPeriods.find((item) => item.id === period) ?? frequencyPeriods[0];
-  const periodStart = period === "year" ? startOfCalendarYear(dashboard.syncedAt) : startOfFrequencyRange(dashboard.syncedAt, periodConfig.weeks);
-  const periodStartKey = toDateKey(periodStart);
-  const periodEndKey = toDateKey(new Date(dashboard.syncedAt));
-  const selectedActivity = dashboard.activity.filter((entry) => entry.date >= periodStartKey && entry.date <= periodEndKey);
-  const selectedWorkouts = selectedActivity.reduce((sum, entry) => sum + entry.count, 0);
+  const selectedYearNumber = Number(selectedYear);
+  const yearOptions = useMemo(() => {
+    const years = new Set(dashboard.activity.map((entry) => entry.date.slice(0, 4)));
+    years.add(String(currentYear));
+    return [...years]
+      .sort((left, right) => Number(right) - Number(left))
+      .map((year) => ({ value: year, label: `${year} 年` }));
+  }, [currentYear, dashboard.activity]);
+  const selectedActivity = dashboard.activity.filter((entry) => entry.date.startsWith(`${selectedYear}-`));
+  const latestActiveDate = selectedActivity
+    .filter((entry) => entry.count > 0)
+    .map((entry) => entry.date)
+    .sort()
+    .at(-1) ?? null;
+  const effectiveFrequencyDate = selectedFrequencyDate && selectedActivity.some((entry) => entry.date === selectedFrequencyDate && entry.count > 0)
+    ? selectedFrequencyDate
+    : latestActiveDate;
+  const selectedFrequencyActivity = effectiveFrequencyDate
+    ? selectedActivity.find((entry) => entry.date === effectiveFrequencyDate)
+    : null;
+  const selectedFrequencyPlan = selectedFrequencyActivity?.planNames[0] ?? "";
+  const selectedFrequencyDescription = selectedFrequencyActivity
+    ? `${selectedFrequencyPlan}${selectedFrequencyActivity.count > 1 ? ` 等 ${selectedFrequencyActivity.count} 次` : ""} · ${formatNumber(selectedFrequencyActivity.volumeKg)} kg`
+    : "";
+  const selectedFrequencyDateLabel = effectiveFrequencyDate
+    ? new Date(`${effectiveFrequencyDate}T00:00:00`).toLocaleDateString("zh-CN", { month: "long", day: "numeric" })
+    : "";
   const trendData = dashboard.trend.points.map((point) => ({ date: point.date.slice(5).replace("-", "."), value: point.value }));
   const currentStrength = trendData.at(-1)?.value ?? 0;
-  const activeWeeks = new Set(selectedActivity.map((entry) => {
-    const date = new Date(`${entry.date}T00:00:00`);
-    date.setDate(date.getDate() - ((date.getDay() || 7) - 1));
-    return date.toISOString().slice(0, 10);
-  })).size;
   useEffect(() => {
     if (!showRmRule) return;
     const dismiss = () => setShowRmRule(false);
@@ -400,9 +484,31 @@ function ProfileView({ dashboard, scrollerRef, accountOpen, onAccount }: { dashb
         <div className="profile-hero-meta"><span ref={sourceSettingsRef} className="profile-settings-source" aria-hidden="true"><Settings size={18} /></span><span className="profile-sync-status"><i aria-hidden="true" />{syncLabel}</span></div>
       </header>
       <ProfileSharedTransition initials={initials} scrollerRef={scrollerRef} sourceAvatarRef={sourceAvatarRef} sourceTitleRef={sourceTitleRef} sourceSettingsRef={sourceSettingsRef} targetAvatarRef={targetAvatarRef} targetTitleRef={targetTitleRef} targetSettingsRef={targetSettingsRef} suspended={accountOpen} onAccount={onAccount} />
+      <section className="profile-global-stats" aria-label="全部历史训练统计">
+        <div><span>累计训练</span><strong>{dashboard.summary.totalWorkouts}</strong><small>全部已完成记录</small></div>
+        <div><span>活跃周数</span><strong>{dashboard.summary.activeWeeks}</strong><small>有训练的自然周</small></div>
+        <div><span>连续完成</span><strong>{dashboard.summary.scheduledStreak}</strong><small>按计划训练机会</small></div>
+      </section>
       <section className="frequency">
-        <div className="section-heading"><div><h2>训练频率</h2><p>每一个方格代表一天，颜色越亮表示当天记录越多</p></div><div className="period-tabs" aria-label="训练频率时间范围">{frequencyPeriods.map((item) => <button key={item.id} className={period === item.id ? "active" : ""} aria-pressed={period === item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div></div>
-        <div className="heatmap-row"><div className="heatmap-panel"><Heatmap activity={dashboard.activity} period={period} syncedAt={dashboard.syncedAt} /><div className="heatmap-legend"><span>少</span><i data-level="0" /><i data-level="1" /><i data-level="2" /><i data-level="3" /><span>多</span></div></div><div className="frequency-stats"><div className="frequency-total"><strong>{selectedWorkouts}</strong><span>次训练</span><small>{periodConfig.label}范围</small></div><div className="frequency-meta"><span><b>{activeWeeks}</b>活跃周</span><span><b className="orange">{dashboard.summary.streak}</b>当前连续</span></div></div></div>
+        <div className="section-heading frequency-heading">
+          <div><h2>训练频率</h2><p>一年训练节奏，一眼看清</p></div>
+          <div className="frequency-year-control">
+            <TrackSelect ariaLabel="选择训练年份" value={selectedYear} options={yearOptions} popupMinWidth={104} onChange={(year) => {
+              setSelectedYear(year);
+              setSelectedFrequencyDate(null);
+            }} />
+            <div className="heatmap-legend" aria-label="训练次数图例"><span>少</span><i data-level="0" /><i data-level="1" /><i data-level="2" /><i data-level="3" /><span>多</span></div>
+          </div>
+        </div>
+        <div className="heatmap-panel">
+          <Heatmap activity={dashboard.activity} year={selectedYearNumber} syncedAt={dashboard.syncedAt} selectedDate={effectiveFrequencyDate} onSelectDate={setSelectedFrequencyDate} />
+          {effectiveFrequencyDate && (
+            <div className="frequency-selected-summary">
+              <span><i aria-hidden="true" />{selectedFrequencyDateLabel}</span>
+              <strong title={selectedFrequencyDescription}>{selectedFrequencyDescription}</strong>
+            </div>
+          )}
+        </div>
       </section>
       <div className="profile-progress-columns">
         <section className="timeline"><div className="section-heading"><h2>近期训练</h2><span>已完成记录</span></div>{dashboard.recentWorkouts.length ? dashboard.recentWorkouts.map((session, index) => { const date = new Date(session.started_at); return <div className={`session ${["lime", "orange", "blue"][index % 3]}`} key={session.id}><i /><time><strong>{String(date.getDate()).padStart(2, "0")}</strong><small>{date.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</small></time><div><h3>{session.plan_name}</h3><p>{session.set_count} 组 · {formatDuration(session.duration_seconds)}</p><b>训练容量 · {formatNumber(session.volume_kg)} kg</b></div></div>; }) : <div className="data-empty"><History size={26} /><strong>还没有已完成的训练</strong><p>完成一次训练后，这里会形成你的训练时间线。</p></div>}<footer><span>累计 {dashboard.summary.totalWorkouts} 次训练</span><i aria-hidden="true" /><b>已云端同步</b></footer></section>
@@ -418,11 +524,27 @@ function ProfileView({ dashboard, scrollerRef, accountOpen, onAccount }: { dashb
 }
 
 function Leaderboard({ entries }: { entries: LeaderboardEntry[] }) {
-  const tones = ["lime", "orange", "blue", "purple"];
+  const rankIcon = (rank: number) => {
+    if (rank === 1) return <Crown aria-hidden="true" size={13} strokeWidth={2.2} />;
+    if (rank === 2) return <Medal aria-hidden="true" size={13} strokeWidth={2.2} />;
+    if (rank === 3) return <Award aria-hidden="true" size={13} strokeWidth={2.2} />;
+    return null;
+  };
+  const rankTone = (rank: number) => rank <= 3 ? `rank-${rank}` : "rank-default";
   return (
     <section className="leaderboard">
       <div className="section-heading"><div><h2>好友进步榜</h2><p>按相对力量进步率与训练稳定性综合排名</p></div><span>近 8 周</span></div>
-      <div className="rank-list">{entries.length ? entries.map((friend, index) => <div className={`rank-row ${tones[index % tones.length]}`} key={`${friend.rank}-${friend.name}`}><b>{String(friend.rank).padStart(2, "0")}</b><div><strong>{friend.isCurrentUser ? `${friend.name}（我）` : friend.name}</strong><span>{friend.progressPercent === null ? "建立基线中" : `${friend.progressPercent >= 0 ? "+" : ""}${friend.progressPercent}%`}</span><div className="rank-track"><i style={{ width: `${Math.max(5, friend.score)}%` }} /></div><small>稳定性 {friend.stability} · 综合分 {friend.score}</small></div></div>) : <div className="data-empty"><Trophy size={26} /><strong>榜单等待第一条记录</strong><p>邀请朋友并开始训练后，这里会按个人进步公平排名。</p></div>}</div>
+      <div className="rank-list">{entries.length ? entries.map((friend) => (
+        <div className={`rank-row ${rankTone(friend.rank)}`} key={`${friend.rank}-${friend.name}`}>
+          <div className="rank-position">{rankIcon(friend.rank)}<b>{String(friend.rank).padStart(2, "0")}</b></div>
+          <div className="rank-copy">
+            <strong>{friend.isCurrentUser ? `${friend.name}（我）` : friend.name}</strong>
+            <span className="rank-status">{friend.progressPercent === null ? "建立基线中" : `${friend.progressPercent >= 0 ? "+" : ""}${friend.progressPercent}%`}</span>
+            <div className="rank-track"><i style={{ width: `${Math.max(5, friend.score)}%` }} /></div>
+            <small>稳定性 {friend.stability} · 综合分 {friend.score}</small>
+          </div>
+        </div>
+      )) : <div className="data-empty"><Trophy size={26} /><strong>榜单等待第一条记录</strong><p>邀请朋友并开始训练后，这里会按个人进步公平排名。</p></div>}</div>
       <footer><span>RANKING METHOD</span><p>相对进步 70% · 稳定性 30%</p></footer>
     </section>
   );
@@ -508,7 +630,7 @@ function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut 
         {user ? <div className="account-panel">
           <div className="profile-sheet-handle" aria-hidden="true" />
           <div className="profile-drawer-header"><span className="profile-avatar" aria-hidden="true">{profileInitials}</span><div><h2>{user.displayName}</h2><p>@{user.username} · 加入练迹 {joinedDays} 天</p></div></div>
-          <div className="profile-drawer-stats"><div><strong>{dashboard?.summary.totalWorkouts ?? "--"}</strong><span>累计训练</span></div><div><strong>{dashboard?.summary.streak ?? "--"}</strong><span>当前连续</span></div><div><strong>{me?.stability ?? "--"}</strong><span>稳定性</span></div></div>
+          <div className="profile-drawer-stats"><div><strong>{dashboard?.summary.totalWorkouts ?? "--"}</strong><span>累计训练</span></div><div><strong>{dashboard?.summary.scheduledStreak ?? "--"}</strong><span>连续完成</span></div><div><strong>{me?.stability ?? "--"}</strong><span>稳定性</span></div></div>
           <div className={`profile-sync-line ${dashboard ? "is-synced" : "is-syncing"}`} role="status"><i /><span>{dashboard ? "训练数据已同步" : "正在同步训练数据"}</span><b>{dashboard ? "已同步" : "同步中"}</b></div>
           <div className="invite-generator">
             <div><strong>邀请朋友加入</strong><span>邀请码 7 天内可使用 1 次</span></div>
@@ -788,7 +910,7 @@ export default function Home() {
     : !dashboard ? <div className="screen-state"><Activity size={28} /><strong>正在读取真实数据</strong></div>
     : view === "today" ? <TodayView dashboard={dashboard} activeWorkout={activeWorkout} scrollerRef={appContentRef} selections={todaySelections} setSelections={setTodaySelections} onPlan={() => navigateView("plan")} error={workoutError} />
     : view === "plan" ? <TrainingPlanView key={dashboard.plan.version} plan={dashboard.plan} scrollerRef={appContentRef} initialWeekday={planWeekday} onWeekdayChange={setPlanWeekday} onSave={savePlan} saving={saving} error={workoutError} />
-    : view === "workout" && activeWorkout && currentWorkoutExercise ? <ActiveWorkoutView workout={activeWorkout} exercise={currentWorkoutExercise} onBack={() => setView("today")} onSaveSet={saveSet} onSkip={() => finishExercise(currentWorkoutExercise.id, true)} saving={saving} error={workoutError} />
+    : view === "workout" && activeWorkout && currentWorkoutExercise ? <ActiveWorkoutView workout={activeWorkout} exercise={currentWorkoutExercise} onBack={() => setView("today")} onSaveSet={saveSet} onFinishExercise={(skipped) => finishExercise(currentWorkoutExercise.id, skipped)} saving={saving} error={workoutError} />
     : view === "ranking" ? <RankingView entries={dashboard.leaderboard} />
     : <ProfileView dashboard={dashboard} scrollerRef={appContentRef} accountOpen={accountOpen} onAccount={() => setAccountOpen(true)} />;
   const showMobileNav = view !== "workout" && Boolean(user);
