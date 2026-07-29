@@ -62,6 +62,10 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(page, /className="heatmap-scroll"/);
   assert.match(page, /可横向拖动查看/);
   assert.match(page, /const chineseMonths = \["一月".+"十二月"\]/);
+  assert.match(page, /className="frequency-heading-copy"/);
+  assert.match(page, /<h2>训练频率<\/h2>\s*<p>一年训练节奏，一眼看清<\/p>/);
+  assert.match(styles, /\.frequency-heading-copy \{[^}]+display: flex[^}]+align-items: baseline/);
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]+\.heatmap-panel \{ margin-top: 8px/);
   assert.doesNotMatch(page, /训练频率时间范围/);
   assert.doesNotMatch(page, /frequencyPeriods/);
   assert.match(page, /data-testid="profile-view"/);
@@ -87,7 +91,18 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(styles, /grid-template-columns: repeat\(4, 1fr\)/);
   assert.match(styles, /profile-drawer/);
   assert.match(page, /profile-sheet-handle/);
-  assert.match(page, /训练数据已同步/);
+  assert.doesNotMatch(page, /profile-drawer-stats/);
+  assert.doesNotMatch(page, /profile-sync-line/);
+  assert.doesNotMatch(page, /训练数据已同步/);
+  assert.doesNotMatch(styles, /profile-drawer-stats/);
+  assert.doesNotMatch(styles, /profile-sync-line/);
+  assert.match(page, /生成后 7 天内有效，仅限 1 人注册/);
+  assert.doesNotMatch(page, /邀请码 7 天内可使用 1 次/);
+  assert.match(page, /logoutConfirmOpen/);
+  assert.match(page, /退出当前账号？/);
+  assert.match(page, /确认退出/);
+  assert.match(page, /aria-describedby=\{logoutDescriptionId\}/);
+  assert.match(page, /onClick=\{\(\) => void logout\(\)\}/);
   assert.match(styles, /profile-drawer \.invite-generator[^}]+background: var\(--surface-2\)/);
   assert.match(styles, /\.boot-sequence/);
   assert.match(styles, /\.kinetic-field-layer[^}]+pointer-events: none/);
@@ -102,9 +117,56 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(styles, /data-plan-header-condensed="true"\] \.plan-compact-context \{ pointer-events: auto/);
   assert.match(styles, /\.plan-compact-weekdays button\.active\.enabled i \{ background: var\(--lime\)/);
   assert.match(styles, /\.day-status-control\.is-compact \.day-status-action \{ min-height: 32px/);
-  assert.match(styles, /\.day-status-control\.is-compact \.day-status-label \{ line-height: 20px/);
+  assert.match(styles, /\.day-status-control\.is-compact \.day-status-label \{ line-height: 20px; transform: translateY\(1px\)/);
   assert.match(planTransition, /targetDayStatus\.height\) \/ 2;/);
-  assert.match(styles, /\.plan-compact-context \{ height: 40px/);
+  assert.match(trainingPlan, /sourceWeekdaysRef=\{sourceWeekdaysRef\}/);
+  assert.match(trainingPlan, /targetWeekdaysRef=\{compactWeekdaysRef\}/);
+  assert.match(planTransition, /querySelectorAll<HTMLElement>\("button > b"\)/);
+  assert.match(planTransition, /querySelectorAll<HTMLElement>\("button > span"\)/);
+  assert.match(planTransition, /querySelectorAll<HTMLElement>\("button > i"\)/);
+  assert.match(planTransition, /const PLAN_HEADER_CONDENSED_THRESHOLD = 0\.72/);
+  assert.match(planTransition, /const weekdayProgress = clamp\(\(progress - 0\.08\) \/ \(PLAN_HEADER_CONDENSED_THRESHOLD - 0\.08\)\)/);
+  assert.match(planTransition, /const getHeaderSnapScrollTop = \(\) => getCollapseDistance\(\) \* PLAN_HEADER_CONDENSED_THRESHOLD/);
+  assert.match(planTransition, /scroller\.addEventListener\("touchmove", handleTouchMove, \{ passive: false \}\)/);
+  assert.match(planTransition, /scroller\.addEventListener\("wheel", handleWheel, \{ passive: false \}\)/);
+  assert.match(planTransition, /if \(touchSnapLocked\) \{[\s\S]+preventGestureScroll\(event\)/);
+  assert.match(planTransition, /if \(wheelSnapLocked\) \{[\s\S]+preventGestureScroll\(event\)/);
+  assert.match(planTransition, /scroller\.addEventListener\("scroll", handleTrackedScroll, \{ passive: true \}\)/);
+  assert.match(planTransition, /if \(touchSnapLocked\) \{[\s\S]+setExactScrollTop\(snapScrollTop\)/);
+  assert.match(planTransition, /touchSnapSide = continuingPastSnap \? 0 : getSnapSide/);
+  assert.match(planTransition, /const CONTENT_RUBBER_BAND_COEFFICIENT = 0\.36/);
+  assert.match(planTransition, /const CONTENT_SPRING_FREQUENCY = 14/);
+  assert.match(planTransition, /const contentRegion = sourceDayEditor\?\.closest<HTMLElement>\("\.plan-workspace"\)/);
+  assert.match(planTransition, /distance[\s\S]+contentRubberBandDimension[\s\S]+CONTENT_RUBBER_BAND_COEFFICIENT[\s\S]+contentRubberBandDimension[\s\S]+CONTENT_RUBBER_BAND_COEFFICIENT \* distance/);
+  assert.match(planTransition, /contentRegion\.style\.transform = `translate3d\(0, \$\{offset\.toFixed\(3\)\}px, 0\)`/);
+  assert.match(planTransition, /window\.requestAnimationFrame\(flushContentRubberBand\)/);
+  assert.match(planTransition, /Math\.exp\(-CONTENT_SPRING_FREQUENCY \* elapsed\)/);
+  assert.doesNotMatch(planTransition, /CONTENT_RUBBER_BAND_LIMIT|contentRegion\.animate/);
+  assert.match(planTransition, /setContentRubberBand\(touchRubberBandDistance\)/);
+  assert.doesNotMatch(planTransition, /playWeekdaySnapFeedback|weekdaySnapOffset/);
+  assert.match(planTransition, /const compactShellTop = compactShell\?\.getBoundingClientRect\(\)\.top \?\? stickyTop/);
+  assert.match(planTransition, /y: stickyTop \+ rect\.top - compactShellTop/);
+  assert.match(planTransition, /const weekdayDetailsFadeEnd = window\.innerWidth <= 600 \? 1 \/ 2\.1 : 1 \/ 1\.5/);
+  assert.match(planTransition, /const weekdayDotRevealProgress = smoothstep\(clamp\(\(progress - weekdayDetailsFadeEnd\) \/ 0\.1\)\)/);
+  assert.match(planTransition, /writeWeekday\(element, measurements!\.sourceWeekdays\[index\], measurements!\.targetWeekdays\[index\]/);
+  assert.match(planTransition, /writeWeekdayDot\(element, measurements!\.sourceWeekdays\[index\], measurements!\.targetWeekdayDots\[index\]/);
+  assert.doesNotMatch(planTransition, /weekdayHandoffComplete/);
+  assert.match(planTransition, /setTargetWeekdayLabelsVisibility\(false\);[\s\S]+setSharedWeekdaysVisibility\(true\);[\s\S]+setTargetWeekdaySharedTransition\(true\)/);
+  assert.match(planTransition, /writeWeekdayUnderline\([\s\S]+measurements\.targetWeekdayUnderline/);
+  assert.match(styles, /\.plan-shared-weekday \{ opacity: 0; white-space: nowrap; transform-origin: left top/);
+  assert.match(styles, /\.plan-shared-weekday-dot \{ border-radius: 50%; opacity: 0; will-change: transform, opacity/);
+  assert.match(styles, /\.plan-shared-weekday-underline \{ background: var\(--lime\); opacity: 0; will-change: transform, opacity/);
+  assert.match(styles, /\.plan-compact-weekdays\[data-shared-weekdays="true"\] button\.active::after \{ opacity: 0/);
+  assert.match(styles, /\.app-content \{[^}]+--compact-row-height: 56px;[^}]+--compact-leading-size: 26px;[^}]+--compact-gap: 10px/);
+  assert.match(styles, /\.today-compact-bar \{[^}]+height: var\(--compact-row-height\);[^}]+gap: var\(--compact-gap\)/);
+  assert.match(styles, /\.plan-compact-context \{[^}]+height: var\(--compact-row-height\);[^}]+grid-template-columns: var\(--compact-leading-size\)[^}]+gap: var\(--compact-gap\)/);
+  assert.match(styles, /\.profile-compact-bar \{[^}]+height: var\(--compact-row-height\);[^}]+grid-template-columns: var\(--compact-leading-size\)[^}]+gap: var\(--compact-gap\)/);
+  assert.match(styles, /\.profile-view \{ --profile-section-gap: 32px; --profile-settings-edge-offset: 10px/);
+  assert.match(styles, /\.profile-compact-settings-target \{[^}]+transform: translate3d\(var\(--profile-settings-edge-offset\),0,0\)/);
+  assert.match(styles, /\.profile-settings-source \{[^}]+transform: translate3d\(var\(--profile-settings-edge-offset\),0,0\)/);
+  assert.match(styles, /\.app-content \{ --compact-row-height: 54px; height: 100svh/);
+  assert.match(styles, /\.plan-compact-shell \{ margin-inline: 6px/);
+  assert.match(styles, /\.plan-compact-shell::before \{ left: -24px; right: -24px; height: 106px/);
   assert.match(styles, /\.plan-compact-weekdays \{[^}]+margin-top: -4px/);
   assert.match(styles, /\.plan-compact-weekdays button span \{ font: 700 13px\/1 var\(--font-mono\)/);
   assert.match(styles, /\.week-rail > button > b \{ font-size: 13px/);
@@ -393,31 +455,64 @@ test("训练统计使用全历史数据和计划版本口径", async () => {
   assert.match(dashboard, /calculateScheduledTrainingStreak/);
   assert.match(dashboard, /scheduledStreak: calculateScheduledTrainingStreak/);
   assert.match(dashboard, /countActiveWeeks/);
+  assert.match(dashboard, /WITH eligible_sets AS/);
+  assert.match(dashboard, /ROW_NUMBER\(\) OVER/);
+  assert.match(dashboard, /strengthExerciseResult/);
+  assert.match(dashboard, /strengthExerciseResult\.results\.map/);
+  assert.match(dashboard, /MAX\(eligible_sets\.weight_kg \* \(1 \+ eligible_sets\.reps \/ 30\.0\)\) AS estimated_one_rep_max_kg/);
+  assert.match(dashboard, /MAX\(eligible_sets\.weight_kg\) AS actual_max_weight_kg/);
+  assert.match(dashboard, /estimatedOneRepMaxKg:/);
+  assert.match(dashboard, /actualMaxWeightKg:/);
+  assert.match(dashboard, /exercises: trendExercises/);
   assert.doesNotMatch(dashboard, /workout_sessions\.started_at >= \?/);
   assert.match(page, /全部历史训练统计/);
   assert.match(page, /按计划训练机会/);
+  assert.match(page, /最高估算重量/);
+  assert.doesNotMatch(page, />历史最高估算重量</);
+  assert.match(page, /最高实际重量/);
+  assert.doesNotMatch(page, /有记录的训练日/);
+  assert.match(page, /dataKey="actualWeightKg"/);
+  assert.match(page, /dataKey="estimatedOneRepMaxKg"/);
+  assert.match(page, /"实际重量"/);
+  assert.match(page, /"估算重量"/);
+  assert.match(page, /ariaLabel="选择力量趋势动作"/);
+  assert.match(page, /onChange=\{setSelectedTrendExerciseId\}/);
+  assert.match(page, /暂无重量趋势/);
+  assert.match(page, /绿色表示每日最高实际重量，橙色表示每日最高估算重量/);
   assert.match(page, /selectedFrequencyActivity\.volumeKg/);
+  assert.match(page, /level: count > 0 \? 1 : 0/);
+  assert.doesNotMatch(page, /训练记录图例|heatmap-legend/);
+  assert.doesNotMatch(page, /<span>少<\/span>.+<span>多<\/span>/);
   assert.match(styles, /\.heatmap-scroll \{[^}]+overflow-x: auto/);
   assert.match(styles, /\.heatmap-year-canvas \{[^}]+--heatmap-cell: 16px/);
+  assert.match(styles, /\.heatmap-cell\[data-level="1"\][^}]+background: var\(--lime\)/);
+  assert.doesNotMatch(styles, /background: #455533|background: #8ab83b/);
+  assert.match(styles, /\.profile-view \{ --profile-section-gap: 32px/);
+  assert.match(styles, /\.frequency \{ padding: var\(--profile-section-gap\) 0 0/);
+  assert.match(styles, /\.profile-progress-columns \{[^}]+padding-top: var\(--profile-section-gap\)/);
+  assert.match(styles, /\.profile-global-stats \{ min-height: 0; padding: 0/);
+  assert.match(styles, /grid-template-columns: 1fr; gap: var\(--profile-section-gap\); padding-top: var\(--profile-section-gap\)/);
 });
 
 test("近期训练使用三列账页布局并保持容量结果", async () => {
-  const [page, recentWorkouts, styles] = await Promise.all([
+  const [page, recentWorkouts, historyList, styles] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
     readFile(new URL("components/recent-workouts-timeline.tsx", root), "utf8"),
+    readFile(new URL("components/workout-history-list.tsx", root), "utf8"),
     readFile(new URL("app/globals.css", root), "utf8"),
   ]);
 
   assert.match(page, /<RecentWorkoutsTimeline/);
-  assert.match(recentWorkouts, /className="session-date"/);
-  assert.match(recentWorkouts, /className="session-name"/);
-  assert.match(recentWorkouts, /className="session-volume"/);
-  assert.match(recentWorkouts, /className="session-meta"/);
-  assert.match(recentWorkouts, /className="session-volume-label">训练容量/);
-  assert.match(recentWorkouts, /date\.getMonth\(\) \+ 1/);
-  assert.match(recentWorkouts, /weekday\.value === \(date\.getDay\(\) \|\| 7\)/);
-  assert.match(recentWorkouts, /formatNumber\(session\.volume_kg\)\} <small>kg/);
-  assert.doesNotMatch(recentWorkouts, /session\.volume_kg\s*[?:]/);
+  assert.match(recentWorkouts, /<WorkoutHistoryList records=\{previewRecords\}/);
+  assert.match(historyList, /className="session-date"/);
+  assert.match(historyList, /className="session-name"/);
+  assert.match(historyList, /className="session-volume"/);
+  assert.match(historyList, /className="session-meta"/);
+  assert.match(historyList, /className="session-volume-label">训练容量/);
+  assert.match(historyList, /date\.getMonth\(\) \+ 1/);
+  assert.match(historyList, /weekday\.value === \(date\.getDay\(\) \|\| 7\)/);
+  assert.match(historyList, /formatNumber\(session\.volume_kg\)\} <small>kg/);
+  assert.doesNotMatch(historyList, /session\.volume_kg\s*[?:]/);
   assert.doesNotMatch(page, /累计 \{dashboard\.summary\.totalWorkouts\} 次训练/);
   assert.doesNotMatch(page, /已云端同步/);
   assert.match(styles, /\.session \{ --session-accent: var\(--lime\);[^}]+min-height: 0[^}]+grid-template-columns: 56px minmax\(0, 1fr\) max-content[^}]+grid-template-rows: auto auto/);
@@ -432,13 +527,16 @@ test("近期训练使用三列账页布局并保持容量结果", async () => {
   assert.match(styles, /\.session:last-child::before \{ display: none/);
 });
 
-test("近期训练使用游标分页、固定滚动区与轨迹续接状态", async () => {
-  const [page, recentWorkouts, dashboard, historyQuery, historyRoute, styles] = await Promise.all([
+test("近期训练预览与三分之二历史抽屉使用十条游标分页和触底自动加载", async () => {
+  const [page, recentWorkouts, historyPanel, historyList, dashboard, historyQuery, historyRoute, historyContract, styles] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
     readFile(new URL("components/recent-workouts-timeline.tsx", root), "utf8"),
+    readFile(new URL("components/workout-history-panel.tsx", root), "utf8"),
+    readFile(new URL("components/workout-history-list.tsx", root), "utf8"),
     readFile(new URL("lib/server/dashboard.ts", root), "utf8"),
     readFile(new URL("lib/server/workout-history.ts", root), "utf8"),
     readFile(new URL("app/api/workouts/history/route.ts", root), "utf8"),
+    readFile(new URL("lib/workout-history.ts", root), "utf8"),
     readFile(new URL("app/globals.css", root), "utf8"),
   ]);
 
@@ -450,17 +548,64 @@ test("近期训练使用游标分页、固定滚动区与轨迹续接状态", as
   assert.match(historyQuery, /ORDER BY workout_sessions\.started_at DESC, workout_sessions\.id DESC/);
   assert.match(historyQuery, /LIMIT \?/);
   assert.match(historyRoute, /decodeWorkoutHistoryCursor/);
-  assert.match(recentWorkouts, /WORKOUT_HISTORY_PAGE_SIZE/);
-  assert.match(recentWorkouts, /cursor,/);
-  assert.match(recentWorkouts, /className={`timeline-viewport/);
-  assert.match(recentWorkouts, /正在追溯更早记录…/);
-  assert.match(recentWorkouts, /加载失败，点击重试/);
-  assert.match(recentWorkouts, /已经追溯到最早一次训练/);
-  assert.match(recentWorkouts, /newRecordIndex \* 0\.024/);
-  assert.match(recentWorkouts, /filter: "blur\(3px\)"/);
-  assert.match(styles, /\.timeline-viewport\.is-scrollable \{ height: 440px; max-height: 440px; overflow-x: hidden; overflow-y: auto/);
+  assert.match(historyContract, /WORKOUT_HISTORY_PREVIEW_SIZE = 6/);
+  assert.match(historyContract, /INITIAL_WORKOUT_HISTORY_LIMIT = 10/);
+  assert.match(historyContract, /WORKOUT_HISTORY_PAGE_SIZE = 10/);
+  assert.match(recentWorkouts, /查看全部训练/);
+  assert.match(recentWorkouts, /initialRecords\.slice\(0, WORKOUT_HISTORY_PREVIEW_SIZE\)/);
+  assert.match(recentWorkouts, /initialRecords\.length > WORKOUT_HISTORY_PREVIEW_SIZE/);
+  assert.match(recentWorkouts, /<WorkoutHistoryList records=\{previewRecords\}/);
+  assert.doesNotMatch(recentWorkouts, /requestWorkoutHistory/);
+  assert.doesNotMatch(recentWorkouts, /is-scrollable/);
+  assert.match(historyPanel, /WORKOUT_HISTORY_PAGE_SIZE/);
+  assert.match(historyPanel, /search\.set\("cursor", cursor\)/);
+  assert.match(historyPanel, /initialRecords\.length < INITIAL_WORKOUT_HISTORY_LIMIT/);
+  assert.match(historyPanel, /requestWorkoutHistory\(null\)/);
+  assert.match(historyPanel, /shouldRefreshInitialPage \? \[\] : initialRecords/);
+  assert.doesNotMatch(historyPanel, /openedOnceRef/);
+  assert.match(historyPanel, /AUTO_LOAD_THRESHOLD_PX = 48/);
+  assert.match(historyPanel, /scrollHeight - body\.scrollTop - body\.clientHeight/);
+  assert.doesNotMatch(historyPanel, /加载更早记录/);
+  assert.match(historyPanel, /"connecting"/);
+  assert.match(historyPanel, /MIN_LOADING_FEEDBACK_MS = 1360/);
+  assert.doesNotMatch(historyPanel, /AUTO_REVEAL_MAX_PX/);
+  assert.doesNotMatch(historyPanel, /addedRecordCount/);
+  assert.match(historyPanel, /className="history-energy-track"/);
+  assert.match(historyPanel, /className="history-loading-copy"/);
+  assert.match(historyPanel, /正在读取最近的训练记录…/);
+  assert.match(historyPanel, /正在追溯更早的训练记录…/);
+  assert.match(historyPanel, /正在接入训练记录…/);
+  assert.doesNotMatch(historyPanel, /正在读取最近 10 次训练/);
+  assert.doesNotMatch(historyPanel, /正在接入[^"]*addedRecords\.length/);
+  assert.match(historyPanel, /加载失败，点击重试/);
+  assert.match(historyPanel, /已经追溯到最早一次训练/);
+  assert.match(historyPanel, /className="workout-history-panel-body"/);
+  assert.match(historyPanel, /className="workout-history-layer"/);
+  assert.match(historyPanel, /event\.target !== event\.currentTarget/);
+  assert.match(historyPanel, /aria-label="关闭训练历史"/);
+  assert.doesNotMatch(historyPanel, /返回我的训练/);
+  assert.doesNotMatch(historyPanel, /workout-history-panel-count/);
+  assert.match(historyList, /newRecordIndex \* 0\.032/);
+  assert.match(historyList, /filter: "blur\(2px\)"/);
+  assert.match(historyList, /data-new-record-index=/);
+  assert.match(page, /profileHistoryOpen/);
+  assert.match(page, /profileHistoryLayerActive/);
+  assert.match(page, /profileHistoryScrollTopRef/);
+  assert.match(page, /appContentRef\.current\.scrollTop = profileHistoryScrollTopRef\.current/);
+  assert.match(page, /inert=\{bootVisible \|\| profileHistoryLayerActive\}/);
+  assert.match(page, /setProfileHistoryOpen\(false\);[\s\S]+window\.history\.back\(\)/);
+  assert.match(page, /showMobileNav = view !== "workout" && Boolean\(user\);/);
+  assert.doesNotMatch(page, /showMobileNav = [^;]+profileHistory/);
+  assert.match(page, /dashboard && user && profileHistoryLayerActive/);
+  assert.doesNotMatch(styles, /\.timeline-viewport\.is-scrollable/);
+  assert.match(styles, /\.workout-history-panel-body \{[^}]+overflow-y: auto/);
+  assert.match(styles, /\.workout-history-layer \{[^}]+align-items: flex-end/);
+  assert.match(styles, /\.workout-history-panel \{[^}]+height: 66\.6667dvh/);
+  assert.match(styles, /\.workout-history-panel-header \{[^}]+position: relative/);
   assert.match(styles, /@keyframes history-energy-trace/);
-  assert.match(styles, /prefers-reduced-motion: reduce[^}]+recent-workouts-timeline/s);
+  assert.match(styles, /\.history-energy-track \{[^}]+height: 44px/);
+  assert.match(styles, /translateY\(37px\)/);
+  assert.match(styles, /prefers-reduced-motion: reduce[^}]+workout-history-panel/s);
 });
 
 test("保存周计划后恢复保存前选中的星期", async () => {

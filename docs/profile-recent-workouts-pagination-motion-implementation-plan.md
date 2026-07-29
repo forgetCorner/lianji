@@ -8,10 +8,10 @@
 
 ## 实施目标
 
-把当前一次性返回最多 20 条近期训练的实现改为：
+把近期训练的首屏和后续加载统一为每批最多 6 条：
 
 1. 仪表盘首次返回最近 6 条已完成训练及下一页游标。
-2. 用户每次点击后获取 20 条更早记录。
+2. 用户每次点击后获取 6 条更早记录。
 3. 记录区域进入固定高度的内部滚动，追加数据不继续把力量趋势向下推。
 4. 使用“轨迹续接”动画表达请求、接入、失败和历史终点。
 5. 近期列表在数据库阶段限量查询，全历史统计使用独立的轻量或聚合查询。
@@ -49,7 +49,7 @@
 1. 从 `app/page.tsx` 移出或复用 `WorkoutSummary` 类型，形成前后端共享的记录结构。
 2. 增加：
    - `INITIAL_WORKOUT_HISTORY_LIMIT = 6`
-   - `WORKOUT_HISTORY_PAGE_SIZE = 20`
+   - `WORKOUT_HISTORY_PAGE_SIZE = 6`
    - `WorkoutHistoryPageInfo`
    - `WorkoutHistoryPageResponse`
 3. 增加 `normalizeWorkoutHistoryPageResponse(raw)`：
@@ -147,7 +147,7 @@ ORDER BY workout_sessions.started_at DESC, workout_sessions.id DESC
 
 ### 验证
 
-- 使用本地 D1 准备 27 条隔离测试记录，验证首次 6 条、下一页 20 条和最后 1 条。
+- 使用本地 D1 准备 30 条隔离测试记录，验证首次 6 条及后续连续 4 页各 6 条。
 - 准备相同 `started_at` 的记录验证稳定翻页。
 - 验收后删除测试用户、会话、训练和训练组。
 
@@ -253,7 +253,7 @@ ON workout_sets (workout_session_id);
 - `trend`
 - `leaderboard`
 
-除 `recentWorkouts` 从最多 20 条变为最多 6 条并新增 `pageInfo` 外，其余结果必须一致。
+除 `recentWorkouts` 收敛为最多 6 条并新增 `pageInfo` 外，其余结果必须一致。
 
 ## 阶段 7：提取近期训练组件
 
@@ -291,7 +291,7 @@ type RecentWorkoutsTimelineProps = {
 2. 组件首次使用仪表盘传入的 0–6 条记录，不重复请求第一页。
 3. 只保留一个 `loadMoreHistory()`：
    - `loading` 时立即返回。
-   - 请求 `/api/workouts/history?limit=20&cursor=...`。
+   - 请求 `/api/workouts/history?limit=6&cursor=...`。
    - 使用 `normalizeWorkoutHistoryPageResponse()`。
    - 按 ID 去重并追加。
    - 成功后更新游标。
@@ -385,7 +385,7 @@ section.timeline
    - `translateY: 10px → 0`
    - `blur: 3px → 0`
    - 单条 `240ms`，使用现有 expo 缓动。
-   - 仅前 8 条错峰，每条延迟 `24ms`。
+   - 本批最多 6 条全部错峰，每条延迟 `32ms`。
 5. **成功反馈**
    - `180ms` 状态切换。
    - “已载入 N 条更早记录”保留约 `900ms`。
@@ -445,7 +445,7 @@ section.timeline
 1. 游标编码／解码。
 2. 错误版本、非法时间、空 ID 和损坏 Base64。
 3. 相同开始时间的稳定排序。
-4. 首次 6 条、后续 20 条的边界夹具。
+4. 首次 6 条、后续每页 6 条的边界夹具。
 5. 跨页无重复、无遗漏。
 6. 标准化保留 `0 kg`。
 7. `hasMore = true` 且空数组被拒绝。
@@ -458,7 +458,7 @@ section.timeline
 1. 历史分页路由存在。
 2. 仪表盘包含 `recentWorkoutsPageInfo`。
 3. 近期列表不再出现 `completedSessions.slice(0, 20)`。
-4. 页面请求 `limit=20` 并携带游标。
+4. 页面请求 `limit=6` 并携带游标。
 5. 存在 `timeline-viewport`、加载、失败和终点结构。
 6. CSS 最大高度为 `440px`，只能纵向滚动。
 7. 新记录动画只使用 transform、opacity 和 filter。
@@ -476,7 +476,7 @@ section.timeline
 
 使用隔离本地 QA 用户创建：
 
-- 27 条已完成训练。
+- 30 条已完成训练。
 - 至少两条相同 `started_at`。
 - 至少一条两行长名称。
 - 至少一条 `0 kg`。
@@ -487,12 +487,11 @@ section.timeline
 ### 接口验收
 
 1. 仪表盘返回 6 条及有效游标。
-2. 第一次加载返回 20 条。
-3. 第二次加载返回最后 1 条并结束。
-4. 三批记录 ID 唯一且顺序正确。
-5. 错误游标返回 `400`。
-6. 未登录请求返回 `401`。
-7. `EXPLAIN QUERY PLAN` 命中预期索引。
+2. 后续连续 4 次分别返回 6 条。
+3. 总计 30 个记录 ID 唯一且顺序正确。
+4. 错误游标返回 `400`。
+5. 未登录请求返回 `401`。
+6. `EXPLAIN QUERY PLAN` 命中预期索引。
 
 ### 视觉视口
 
@@ -518,7 +517,7 @@ section.timeline
 ### 动画性能
 
 - 在目标手机宽度下观察加载期间是否掉帧。
-- 确认只有本批前 8 条执行进入动画。
+- 确认本批最多 6 条全部执行进入动画。
 - 确认动画结束后没有长期 `will-change`。
 - 确认请求期间仍可滚动已有记录。
 
@@ -595,7 +594,7 @@ git diff --check
 只有同时满足以下条件才算实施完成：
 
 1. 已确认规格中的 30 项验收标准全部落实。
-2. 游标分页、初始 6 条和后续 20 条通过真实 D1 接口验证。
+2. 游标分页、初始 6 条和后续每页 6 条通过真实 D1 接口验证。
 3. 全历史统计与改造前一致。
 4. 内部滚动、加载动画、错误重试和终点状态在手机与桌面实际通过。
 5. 减少动态模式有完整静态降级。

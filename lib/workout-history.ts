@@ -1,5 +1,6 @@
-export const INITIAL_WORKOUT_HISTORY_LIMIT = 6;
-export const WORKOUT_HISTORY_PAGE_SIZE = 20;
+export const WORKOUT_HISTORY_PREVIEW_SIZE = 6;
+export const INITIAL_WORKOUT_HISTORY_LIMIT = 10;
+export const WORKOUT_HISTORY_PAGE_SIZE = 10;
 
 export type WorkoutSummary = {
   id: string;

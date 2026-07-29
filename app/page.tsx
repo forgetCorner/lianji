@@ -4,7 +4,6 @@ import {
   Activity,
   Award,
   Check,
-  ChevronDown,
   CircleAlert,
   Crown,
   Medal,
@@ -13,7 +12,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import {
   CartesianGrid,
   Line,
@@ -40,11 +39,13 @@ import { TodaySharedTransition } from "@/components/today-shared-transition";
 import { ProfileSharedTransition } from "@/components/profile-shared-transition";
 import { TrackSelect } from "@/components/track-select";
 import { RecentWorkoutsTimeline } from "@/components/recent-workouts-timeline";
+import { WorkoutHistoryPanel } from "@/components/workout-history-panel";
 import type { WorkoutHistoryPageInfo, WorkoutSummary } from "@/lib/workout-history";
 
 type View = "today" | "plan" | "ranking" | "profile" | "workout";
 type ExerciseSelections = Record<string, "primary" | "alternative">;
 const menuViews: View[] = ["today", "plan", "ranking", "profile"];
+const WORKOUT_HISTORY_STATE_KEY = "__lianjiWorkoutHistory";
 
 type AuthUser = { id: string; username: string; displayName: string; createdAt: number };
 type LeaderboardEntry = {
@@ -65,7 +66,24 @@ type DashboardData = {
   activity: { date: string; count: number; volumeKg: number; planNames: string[] }[];
   recentWorkouts: WorkoutSummary[];
   recentWorkoutsPageInfo: WorkoutHistoryPageInfo;
-  trend: { exerciseId: string | null; exerciseName: string | null; points: { date: string; value: number }[] };
+  trend: {
+    exerciseId: string | null;
+    exerciseName: string | null;
+    points: {
+      date: string;
+      estimatedOneRepMaxKg: number;
+      actualMaxWeightKg: number;
+    }[];
+    exercises: {
+      exerciseId: string;
+      exerciseName: string;
+      points: {
+        date: string;
+        estimatedOneRepMaxKg: number;
+        actualMaxWeightKg: number;
+      }[];
+    }[];
+  };
   leaderboard: LeaderboardEntry[];
   syncedAt: number;
 };
@@ -281,7 +299,7 @@ function Heatmap({
     for (const date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
       const key = toDateKey(date);
       const count = counts.get(key) ?? 0;
-      nextCells.push({ key, date: key, count, level: Math.min(3, count), future: date > today, empty: false });
+      nextCells.push({ key, date: key, count, level: count > 0 ? 1 : 0, future: date > today, empty: false });
     }
     const labels = chineseMonths.map((label, month) => {
       const elapsedDays = Math.round((Date.UTC(year, month, 1) - Date.UTC(year, 0, 1)) / 86_400_000);
@@ -392,10 +410,25 @@ function Heatmap({
   );
 }
 
-function ProfileView({ dashboard, scrollerRef, accountOpen, onAccount }: { dashboard: DashboardData; scrollerRef: RefObject<HTMLDivElement | null>; accountOpen: boolean; onAccount: () => void }) {
+function ProfileView({
+  dashboard,
+  scrollerRef,
+  accountOpen,
+  onAccount,
+  onOpenHistory,
+  historyTriggerRef,
+}: {
+  dashboard: DashboardData;
+  scrollerRef: RefObject<HTMLDivElement | null>;
+  accountOpen: boolean;
+  onAccount: () => void;
+  onOpenHistory: () => void;
+  historyTriggerRef: RefObject<HTMLButtonElement | null>;
+}) {
   const currentYear = new Date(dashboard.syncedAt).getFullYear();
   const [selectedYear, setSelectedYear] = useState(String(currentYear));
   const [selectedFrequencyDate, setSelectedFrequencyDate] = useState<string | null>(null);
+  const [selectedTrendExerciseId, setSelectedTrendExerciseId] = useState(dashboard.trend.exerciseId ?? "");
   const [showRmRule, setShowRmRule] = useState(false);
   const rmRuleRef = useRef<HTMLDivElement>(null);
   const sourceAvatarRef = useRef<HTMLSpanElement>(null);
@@ -433,8 +466,27 @@ function ProfileView({ dashboard, scrollerRef, accountOpen, onAccount }: { dashb
   const selectedFrequencyDateLabel = effectiveFrequencyDate
     ? new Date(`${effectiveFrequencyDate}T00:00:00`).toLocaleDateString("zh-CN", { month: "long", day: "numeric" })
     : "";
-  const trendData = dashboard.trend.points.map((point) => ({ date: point.date.slice(5).replace("-", "."), value: point.value }));
-  const currentStrength = trendData.at(-1)?.value ?? 0;
+  const selectedTrend = dashboard.trend.exercises.find((exercise) => exercise.exerciseId === selectedTrendExerciseId)
+    ?? dashboard.trend.exercises[0]
+    ?? { exerciseId: "", exerciseName: "", points: dashboard.trend.points };
+  const trendExerciseOptions = dashboard.trend.exercises.map((exercise) => ({
+    value: exercise.exerciseId,
+    label: exercise.exerciseName,
+    description: exercise.points.length ? `${exercise.points.length} 个力量记录日` : "暂无重量趋势",
+  }));
+  const trendData = selectedTrend.points.map((point) => ({
+    date: point.date.slice(5).replace("-", "."),
+    actualWeightKg: point.actualMaxWeightKg,
+    estimatedOneRepMaxKg: point.estimatedOneRepMaxKg,
+  }));
+  const historicalEstimatedOneRepMax = Math.max(
+    0,
+    ...selectedTrend.points.map((point) => point.estimatedOneRepMaxKg),
+  );
+  const historicalActualMaxWeight = Math.max(
+    0,
+    ...selectedTrend.points.map((point) => point.actualMaxWeightKg),
+  );
   useEffect(() => {
     if (!showRmRule) return;
     const dismiss = () => setShowRmRule(false);
@@ -474,18 +526,20 @@ function ProfileView({ dashboard, scrollerRef, accountOpen, onAccount }: { dashb
       <ProfileSharedTransition initials={initials} scrollerRef={scrollerRef} sourceAvatarRef={sourceAvatarRef} sourceTitleRef={sourceTitleRef} sourceSettingsRef={sourceSettingsRef} targetAvatarRef={targetAvatarRef} targetTitleRef={targetTitleRef} targetSettingsRef={targetSettingsRef} suspended={accountOpen} onAccount={onAccount} />
       <section className="profile-global-stats" aria-label="全部历史训练统计">
         <div><span>累计训练</span><strong>{dashboard.summary.totalWorkouts}</strong><small>全部已完成记录</small></div>
-        <div><span>活跃周数</span><strong>{dashboard.summary.activeWeeks}</strong><small>有训练的自然周</small></div>
         <div><span>连续完成</span><strong>{dashboard.summary.scheduledStreak}</strong><small>按计划训练机会</small></div>
+        <div><span>活跃周数</span><strong>{dashboard.summary.activeWeeks}</strong><small>有训练的自然周</small></div>
       </section>
       <section className="frequency">
         <div className="section-heading frequency-heading">
-          <div><h2>训练频率</h2><p>一年训练节奏，一眼看清</p></div>
+          <div className="frequency-heading-copy">
+            <h2>训练频率</h2>
+            <p>一年训练节奏，一眼看清</p>
+          </div>
           <div className="frequency-year-control">
             <TrackSelect ariaLabel="选择训练年份" value={selectedYear} options={yearOptions} popupMinWidth={104} onChange={(year) => {
               setSelectedYear(year);
               setSelectedFrequencyDate(null);
             }} />
-            <div className="heatmap-legend" aria-label="训练次数图例"><span>少</span><i data-level="0" /><i data-level="1" /><i data-level="2" /><i data-level="3" /><span>多</span></div>
           </div>
         </div>
         <div className="heatmap-panel">
@@ -503,13 +557,14 @@ function ProfileView({ dashboard, scrollerRef, accountOpen, onAccount }: { dashb
           key={`${dashboard.user.id}-${dashboard.syncedAt}`}
           initialRecords={dashboard.recentWorkouts}
           initialPageInfo={dashboard.recentWorkoutsPageInfo}
-          snapshotKey={dashboard.syncedAt}
+          onOpenHistory={onOpenHistory}
+          openTriggerRef={historyTriggerRef}
         />
         <section className="trend">
-          <div className="section-heading"><div ref={rmRuleRef} className="trend-heading-title"><h2>力量趋势</h2><div className="rm-rule"><button type="button" className="rm-rule-trigger" aria-label="查看单次最大重量计算规则" aria-expanded={showRmRule} aria-controls="rm-rule-popover" onClick={() => setShowRmRule((visible) => !visible)}><CircleAlert size={15} /></button></div>{showRmRule && <><i className="rm-rule-pointer" aria-hidden="true" /><div id="rm-rule-popover" className="rm-rule-popover" role="dialog" aria-label="单次最大重量计算规则"><strong>单次最大重量如何估算</strong><p>训练重量 ×（1 + 次数 ÷ 30）</p><small>例如：20 kg 做 12 次，估算结果约为 28 kg。同一动作在同一个训练日完成多组时，只保留当天最高值作为趋势点。</small></div></>}</div><button>{dashboard.trend.exerciseName || "等待记录"} <ChevronDown size={14} /></button></div>
-          <div className="trend-stats"><div><strong>{currentStrength ? formatNumber(currentStrength) : "--"} <em>kg</em></strong><span>估算单次最大重量</span></div><div><strong>{trendData.length}</strong><span>有记录的训练日</span></div><div><strong className="orange">实际</strong><span>来自训练组记录</span></div></div>
-          <div className="chart-wrap">{trendData.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={trendData} margin={{ top: 12, right: 16, left: -20, bottom: 0 }}><CartesianGrid stroke="#29302c" vertical={false} /><XAxis dataKey="date" stroke="#66706b" tickLine={false} axisLine={false} fontSize={10} interval="preserveStartEnd" /><YAxis domain={["dataMin - 5", "dataMax + 5"]} stroke="#66706b" tickLine={false} axisLine={false} fontSize={10} /><Tooltip formatter={(value) => [`${formatNumber(Number(value))} kg`, "估算单次最大重量"]} labelFormatter={(label) => `训练日期 ${label}`} contentStyle={{ background: "#121613", border: "1px solid #303733", borderRadius: 4 }} /><Line type="monotone" dataKey="value" stroke="#c0fa4a" strokeWidth={3} dot={{ r: 3, fill: "#c0fa4a", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#ff9138" }} isAnimationActive={false} /></LineChart></ResponsiveContainer> : <div className="data-empty chart-empty"><Activity size={26} /><strong>等待力量趋势</strong><p>记录同一动作的重量与次数后自动生成。</p></div>}</div>
-          <p className="chart-note">曲线表示同一动作每个训练日的最高估算单次最大重量</p>
+          <div className="section-heading"><div ref={rmRuleRef} className="trend-heading-title"><h2>力量趋势</h2><div className="rm-rule"><button type="button" className="rm-rule-trigger" aria-label="查看估算重量计算规则" aria-expanded={showRmRule} aria-controls="rm-rule-popover" onClick={() => setShowRmRule((visible) => !visible)}><CircleAlert size={15} /></button></div>{showRmRule && <><i className="rm-rule-pointer" aria-hidden="true" /><div id="rm-rule-popover" className="rm-rule-popover" role="dialog" aria-label="估算重量计算规则"><strong>估算重量如何计算</strong><p>训练重量 ×（1 + 次数 ÷ 30）</p><small>例如：20 kg 做 12 次，估算结果约为 28 kg。摘要取该动作的最高实际重量与最高估算重量；下方双曲线按训练日对照展示两项数据。</small></div></>}</div><div className="trend-exercise-control"><TrackSelect ariaLabel="选择力量趋势动作" value={selectedTrend.exerciseId} options={trendExerciseOptions} popupMinWidth={180} disabled={!trendExerciseOptions.length} onChange={setSelectedTrendExerciseId} /></div></div>
+          <div className="trend-stats"><div><strong>{historicalActualMaxWeight ? formatNumber(historicalActualMaxWeight) : "--"} <em>kg</em></strong><span>最高实际重量</span></div><div><strong className="orange">{historicalEstimatedOneRepMax ? formatNumber(historicalEstimatedOneRepMax) : "--"} <em>kg</em></strong><span>最高估算重量</span></div><div><strong className="trend-mode">双线</strong><span>实际与估算重量对照</span></div></div>
+          <div className="chart-wrap">{trendData.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={trendData} margin={{ top: 12, right: 16, left: -20, bottom: 0 }}><CartesianGrid stroke="#29302c" vertical={false} /><XAxis dataKey="date" stroke="#66706b" tickLine={false} axisLine={false} fontSize={10} interval="preserveStartEnd" /><YAxis domain={["dataMin - 5", "dataMax + 5"]} stroke="#66706b" tickLine={false} axisLine={false} fontSize={10} /><Tooltip formatter={(value, name) => [`${formatNumber(Number(value))} kg`, name]} labelFormatter={(label) => `训练日期 ${label}`} contentStyle={{ background: "#121613", border: "1px solid #303733", borderRadius: 4 }} /><Line type="monotone" dataKey="actualWeightKg" name="实际重量" stroke="#c0fa4a" strokeWidth={3} dot={{ r: 3, fill: "#c0fa4a", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#c0fa4a" }} isAnimationActive={false} /><Line type="monotone" dataKey="estimatedOneRepMaxKg" name="估算重量" stroke="#ff9138" strokeWidth={3} dot={{ r: 3, fill: "#ff9138", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#ff9138" }} isAnimationActive={false} /></LineChart></ResponsiveContainer> : <div className="data-empty chart-empty"><Activity size={26} /><strong>等待力量趋势</strong><p>记录同一动作的重量与次数后自动生成。</p></div>}</div>
+          <p className="chart-note">绿色表示每日最高实际重量，橙色表示每日最高估算重量</p>
         </section>
       </div>
     </section>
@@ -553,9 +608,45 @@ function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut 
   const [error, setError] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const me = dashboard?.leaderboard.find((entry) => entry.isCurrentUser);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const logoutTitleId = useId();
+  const logoutDescriptionId = useId();
+  const logoutTriggerRef = useRef<HTMLButtonElement>(null);
+  const logoutCancelRef = useRef<HTMLButtonElement>(null);
+  const logoutConfirmRef = useRef<HTMLButtonElement>(null);
+  const logoutInFlightRef = useRef(false);
   const joinedDays = user ? Math.max(1, Math.floor(((dashboard?.syncedAt ?? user.createdAt) - user.createdAt) / (24 * 60 * 60 * 1000)) + 1) : 0;
   const profileInitials = user?.displayName.slice(0, 2).toUpperCase() ?? "";
+
+  useEffect(() => {
+    if (!logoutConfirmOpen) return;
+    const logoutTrigger = logoutTriggerRef.current;
+    const focusFrame = window.requestAnimationFrame(() => logoutConfirmRef.current?.focus({ preventScroll: true }));
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !logoutInFlightRef.current) {
+        event.preventDefault();
+        setLogoutConfirmOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const first = logoutCancelRef.current;
+      const last = logoutConfirmRef.current;
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleKeyDown);
+      if (logoutTrigger?.isConnected) logoutTrigger.focus({ preventScroll: true });
+    };
+  }, [logoutConfirmOpen]);
 
   async function submitAccount(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -592,6 +683,7 @@ function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut 
   }
 
   async function logout() {
+    logoutInFlightRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -600,6 +692,7 @@ function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut 
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "退出失败");
     } finally {
+      logoutInFlightRef.current = false;
       setSubmitting(false);
     }
   }
@@ -617,20 +710,18 @@ function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut 
 
   return (
     <div className={`modal-backdrop ${user ? "profile-backdrop" : ""}`} role="presentation" onClick={(event) => user && event.target === event.currentTarget && onClose()}>
-      <div className={`account-dialog ${user ? "profile-drawer" : ""}`} role="dialog" aria-modal="true" aria-label={user ? "个人档案与账号设置" : registering ? "注册练迹账号" : "登录练迹"}>
+      <div className={`account-dialog ${user ? "profile-drawer" : ""}`} role="dialog" aria-modal="true" aria-hidden={logoutConfirmOpen || undefined} inert={logoutConfirmOpen} aria-label={user ? "个人档案与账号设置" : registering ? "注册练迹账号" : "登录练迹"}>
         {user && <button className="dialog-close" onClick={onClose} aria-label="关闭"><X /></button>}
         {!user && <Brand />}
         {user ? <div className="account-panel">
           <div className="profile-sheet-handle" aria-hidden="true" />
           <div className="profile-drawer-header"><span className="profile-avatar" aria-hidden="true">{profileInitials}</span><div><h2>{user.displayName}</h2><p>@{user.username} · 加入练迹 {joinedDays} 天</p></div></div>
-          <div className="profile-drawer-stats"><div><strong>{dashboard?.summary.totalWorkouts ?? "--"}</strong><span>累计训练</span></div><div><strong>{dashboard?.summary.scheduledStreak ?? "--"}</strong><span>连续完成</span></div><div><strong>{me?.stability ?? "--"}</strong><span>稳定性</span></div></div>
-          <div className={`profile-sync-line ${dashboard ? "is-synced" : "is-syncing"}`} role="status"><i /><span>{dashboard ? "训练数据已同步" : "正在同步训练数据"}</span><b>{dashboard ? "已同步" : "同步中"}</b></div>
           <div className="invite-generator">
-            <div><strong>邀请朋友加入</strong><span>邀请码 7 天内可使用 1 次</span></div>
+            <div><strong>邀请朋友加入</strong><span>生成后 7 天内有效，仅限 1 人注册</span></div>
             {inviteCode ? <div className="invite-result"><code>{inviteCode}</code><button className="secondary-action" onClick={copyInvite}>{copied ? "已复制" : "复制邀请码"}</button><small>原始邀请码仅在这里显示，请及时发送给朋友。</small></div> : <button className="primary-action" onClick={createInvite} disabled={submitting}>{submitting ? "正在创建…" : "生成一次性邀请码"}</button>}
           </div>
           {error && <p className="form-error" role="alert">{error}</p>}
-          <button className="text-action logout-action" onClick={logout} disabled={submitting}>退出当前账号</button>
+          <button ref={logoutTriggerRef} className="text-action logout-action" onClick={() => { setError(null); setLogoutConfirmOpen(true); }} disabled={submitting}>退出当前账号</button>
         </div> : <>
           <span className="eyebrow">{registering ? "INVITE ONLY" : "WELCOME BACK"}</span>
           <h2>{registering ? "用邀请码加入练迹" : "继续你的训练轨迹"}</h2>
@@ -645,16 +736,47 @@ function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut 
           <button className="text-action" onClick={() => { setRegistering((value) => !value); setError(null); }}>{registering ? "已有账号，直接登录" : "没有账号？使用邀请码注册"}</button>
         </>}
       </div>
+      {logoutConfirmOpen && (
+        <div
+          className="day-status-confirm-backdrop logout-confirm-backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (!submitting && event.target === event.currentTarget) setLogoutConfirmOpen(false);
+          }}
+        >
+          <section
+            className="day-status-confirm logout-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={logoutTitleId}
+            aria-describedby={logoutDescriptionId}
+          >
+            <h2 id={logoutTitleId}>退出当前账号？</h2>
+            <p id={logoutDescriptionId}>退出后需要重新登录，才能继续查看和记录训练。</p>
+            {error && <p className="form-error" role="alert">{error}</p>}
+            <div className="day-status-confirm-actions">
+              <button ref={logoutCancelRef} type="button" className="secondary-action" onClick={() => setLogoutConfirmOpen(false)} disabled={submitting}>取消</button>
+              <button ref={logoutConfirmRef} type="button" className="primary-action logout-confirm-action" onClick={() => void logout()} disabled={submitting}>{submitting ? "正在退出…" : "确认退出"}</button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
 
 export default function Home() {
   const appContentRef = useRef<HTMLDivElement>(null);
+  const profileHistoryScrollTopRef = useRef(0);
+  const profileHistoryTriggerRef = useRef<HTMLButtonElement>(null);
+  const profileHistorySnapshotRef = useRef<string | null>(null);
   const [todayActionRoot, setTodayActionRoot] = useState<HTMLDivElement | null>(null);
   const [todaySelections, setTodaySelections] = useState<ExerciseSelections>({});
   const [planWeekday, setPlanWeekday] = useState<number | null>(null);
   const [view, setView] = useState<View>("today");
+  const [profileHistoryOpen, setProfileHistoryOpen] = useState(false);
+  const [profileHistoryLayerActive, setProfileHistoryLayerActive] =
+    useState(false);
   const [pageDirection, setPageDirection] = useState<1 | -1>(1);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -671,6 +793,9 @@ export default function Home() {
   const [workoutError, setWorkoutError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [visualPulse, setVisualPulse] = useState(0);
+  const dashboardHistoryKey = dashboard
+    ? `${dashboard.user.id}-${dashboard.syncedAt}`
+    : null;
 
   const navigateView = useCallback((nextView: View) => {
     if (nextView === view) return;
@@ -679,6 +804,46 @@ export default function Home() {
     const nextIndex = menuViews.indexOf(nextView);
     if (currentIndex >= 0 && nextIndex >= 0 && currentIndex !== nextIndex) setPageDirection(nextIndex > currentIndex ? 1 : -1);
     setView(nextView);
+  }, [view]);
+
+  const openProfileHistory = useCallback(() => {
+    if (!dashboardHistoryKey) return;
+    profileHistoryScrollTopRef.current = appContentRef.current?.scrollTop ?? 0;
+    profileHistorySnapshotRef.current = dashboardHistoryKey;
+    const currentState =
+      window.history.state && typeof window.history.state === "object"
+        ? window.history.state
+        : {};
+    if (!currentState[WORKOUT_HISTORY_STATE_KEY]) {
+      window.history.pushState(
+        { ...currentState, [WORKOUT_HISTORY_STATE_KEY]: true },
+        "",
+      );
+    }
+    setProfileHistoryLayerActive(true);
+    setProfileHistoryOpen(true);
+  }, [dashboardHistoryKey]);
+
+  const closeProfileHistory = useCallback(() => {
+    const currentState =
+      window.history.state && typeof window.history.state === "object"
+        ? window.history.state
+        : {};
+    setProfileHistoryOpen(false);
+    if (currentState[WORKOUT_HISTORY_STATE_KEY]) {
+      window.history.back();
+      return;
+    }
+  }, []);
+
+  const handleProfileHistoryExited = useCallback(() => {
+    if (appContentRef.current) {
+      appContentRef.current.scrollTop = profileHistoryScrollTopRef.current;
+    }
+    setProfileHistoryLayerActive(false);
+    if (view === "profile") {
+      requestAnimationFrame(() => profileHistoryTriggerRef.current?.focus());
+    }
   }, [view]);
 
   async function loadDashboard(resumeWorkout = false) {
@@ -721,6 +886,52 @@ export default function Home() {
     const timer = window.setTimeout(() => setNotice(null), 3200);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const currentState =
+        window.history.state && typeof window.history.state === "object"
+          ? window.history.state
+          : {};
+      if (!currentState[WORKOUT_HISTORY_STATE_KEY]) {
+        setProfileHistoryOpen(false);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (!profileHistoryLayerActive) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [profileHistoryLayerActive]);
+
+  useEffect(() => {
+    if (!profileHistoryOpen) {
+      return;
+    }
+    const invalidHistoryContext =
+      view !== "profile" ||
+      !user ||
+      !dashboardHistoryKey ||
+      profileHistorySnapshotRef.current !== dashboardHistoryKey;
+    if (!invalidHistoryContext) return;
+
+    const frame = requestAnimationFrame(() => {
+      const currentState =
+        window.history.state && typeof window.history.state === "object"
+          ? { ...window.history.state }
+          : {};
+      delete currentState[WORKOUT_HISTORY_STATE_KEY];
+      window.history.replaceState(currentState, "");
+      setProfileHistoryOpen(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [dashboardHistoryKey, profileHistoryOpen, user, view]);
 
   useEffect(() => {
     if (!user) return;
@@ -905,13 +1116,13 @@ export default function Home() {
     : view === "plan" ? <TrainingPlanView key={dashboard.plan.version} plan={dashboard.plan} scrollerRef={appContentRef} initialWeekday={planWeekday} onWeekdayChange={setPlanWeekday} onSave={savePlan} saving={saving} error={workoutError} />
     : view === "workout" && activeWorkout && currentWorkoutExercise ? <ActiveWorkoutView workout={activeWorkout} exercise={currentWorkoutExercise} onBack={() => setView("today")} onSaveSet={saveSet} onFinishExercise={(skipped) => finishExercise(currentWorkoutExercise.id, skipped)} saving={saving} error={workoutError} />
     : view === "ranking" ? <RankingView entries={dashboard.leaderboard} />
-    : <ProfileView dashboard={dashboard} scrollerRef={appContentRef} accountOpen={accountOpen} onAccount={() => setAccountOpen(true)} />;
+    : <ProfileView dashboard={dashboard} scrollerRef={appContentRef} accountOpen={accountOpen} onAccount={() => setAccountOpen(true)} onOpenHistory={openProfileHistory} historyTriggerRef={profileHistoryTriggerRef} />;
   const showMobileNav = view !== "workout" && Boolean(user);
 
   return (
-    <main className={`app-shell ${brandLanded ? "boot-arrived" : ""}`.trim()}>
+    <main className={`app-shell ${brandLanded ? "boot-arrived" : ""} ${profileHistoryLayerActive ? "is-history-open" : ""}`.trim()}>
       <KineticField mode={kineticMode} intensity={kineticIntensity} progress={kineticProgress} pulseKey={visualPulse} />
-      <div className={`app-runtime ${bootVisible ? "boot-active" : ""} ${showMobileNav ? "has-mobile-nav" : ""}`.trim()} inert={bootVisible} aria-hidden={bootVisible ? true : undefined}>
+      <div className={`app-runtime ${bootVisible ? "boot-active" : ""} ${showMobileNav ? "has-mobile-nav" : ""}`.trim()} inert={bootVisible || profileHistoryLayerActive} aria-hidden={bootVisible || profileHistoryLayerActive ? true : undefined}>
         <div ref={setTodayActionRoot} className="today-action-root" />
         <Sidebar view={view} setView={navigateView} onAccount={() => setAccountOpen(true)} user={user} />
         <div ref={appContentRef} className={`app-content ${view === "workout" ? "is-workout" : ""}`.trim()}>
@@ -922,6 +1133,17 @@ export default function Home() {
         {(accountOpen || !user) && !checkingSession && <AccountDialog user={user} dashboard={dashboard} onClose={() => setAccountOpen(false)} onAuthenticated={(authenticatedUser) => { setUser(authenticatedUser); setAccountOpen(false); setDashboard(null); void loadDashboard(); }} onLoggedOut={() => { setUser(null); setDashboard(null); setActiveWorkout(null); setTodayWorkoutStatus("not_started"); setAccountOpen(true); setView("today"); }} />}
         {notice && <div className="sync-toast" role="status"><Check size={18} />{notice}</div>}
       </div>
+      {dashboard && user && profileHistoryLayerActive && (
+        <WorkoutHistoryPanel
+          key={`${dashboard.user.id}-${dashboard.syncedAt}`}
+          open={profileHistoryOpen && view === "profile"}
+          initialRecords={dashboard.recentWorkouts}
+          initialPageInfo={dashboard.recentWorkoutsPageInfo}
+          snapshotKey={dashboard.syncedAt}
+          onRequestClose={closeProfileHistory}
+          onExited={handleProfileHistoryExited}
+        />
+      )}
       {bootVisible && <AppBootSequence phase={bootPhase} error={dashboardError} onRetry={() => void retryBoot()} onFinished={finishBoot} />}
     </main>
   );

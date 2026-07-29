@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   calculateScheduledTrainingStreak,
   countActiveWeeks,
+  estimateOneRepMaxKg,
   shanghaiWeekKey,
 } from "../lib/training-summary-domain.ts";
 
@@ -65,4 +66,10 @@ test("计划修改只影响版本生效后的训练机会", () => {
 test("活跃周数按上海自然周去重", () => {
   assert.equal(shanghaiWeekKey("2026-07-26"), "2026-07-20");
   assert.equal(countActiveWeeks(["2026-07-20", "2026-07-24", "2026-07-27"]), 2);
+});
+
+test("估算单次最大重量使用训练重量和单组次数", () => {
+  assert.equal(estimateOneRepMaxKg(20, 12), 28);
+  assert.equal(estimateOneRepMaxKg(0, 12), 0);
+  assert.equal(estimateOneRepMaxKg(20, 0), 0);
 });

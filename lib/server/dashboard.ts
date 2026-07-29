@@ -3,7 +3,7 @@ import type { AuthUser } from "@/lib/server/auth";
 import { getActivePlan, shanghaiWeekday } from "@/lib/server/plans";
 import { finalizeExpiredPlanWorkouts } from "@/lib/server/workouts";
 import { getWorkoutHistoryPage } from "@/lib/server/workout-history";
-import { calculateScheduledTrainingStreak, countActiveWeeks } from "@/lib/training-summary-domain";
+import { calculateScheduledTrainingStreak, countActiveWeeks, estimateOneRepMaxKg } from "@/lib/training-summary-domain";
 import { INITIAL_WORKOUT_HISTORY_LIMIT } from "@/lib/workout-history";
 
 type CompletedSessionRow = {
@@ -31,6 +31,18 @@ type SetRow = {
 };
 
 type UserRow = { id: string; display_name: string };
+type StrengthExerciseRow = {
+  exercise_id: string;
+  exercise_name: string;
+};
+type StrengthTrendRow = {
+  exercise_id: string;
+  exercise_name: string;
+  trend_date: string;
+  estimated_one_rep_max_kg: number;
+  actual_max_weight_kg: number;
+  latest_completed_at: number;
+};
 type ScheduleRevisionRow = {
   effective_at: number;
   enabled_weekdays: string;
@@ -66,7 +78,7 @@ function weekKey(timestamp: number): string {
 function bestStrengthByExercise(rows: SetRow[]): Map<string, number> {
   const best = new Map<string, number>();
   for (const row of rows) {
-    const e1rm = row.weight_kg * (1 + row.reps / 30);
+    const e1rm = estimateOneRepMaxKg(row.weight_kg, row.reps);
     best.set(row.exercise_id, Math.max(best.get(row.exercise_id) ?? 0, e1rm));
   }
   return best;
@@ -106,13 +118,13 @@ export async function buildDashboard(user: AuthUser) {
   const database = getD1();
   const plan = await getActivePlan(user.id);
   const now = Date.now();
-  const yearAgo = now - 366 * 24 * 60 * 60 * 1000;
   const fiftySixDaysAgo = now - 56 * 24 * 60 * 60 * 1000;
   const [
     recentWorkoutPage,
     completedSessionResult,
     activityResult,
-    currentSetResult,
+    strengthExerciseResult,
+    strengthTrendResult,
     rankingSetResult,
     userResult,
     scheduleRevisionResult,
@@ -140,8 +152,65 @@ export async function buildDashboard(user: AuthUser) {
        ORDER BY activity_date`,
     ).bind(user.id).all<ActivityRow>(),
     database.prepare(
-      "SELECT user_id, exercise_id, exercise_name, weight_kg, reps, completed_at FROM workout_sets WHERE user_id = ? AND completed_at >= ? AND tracking_type = 'weight_reps' AND weight_kg > 0 AND reps > 0 ORDER BY completed_at",
-    ).bind(user.id, yearAgo).all<SetRow>(),
+      `WITH ranked_exercises AS (
+         SELECT
+           id,
+           exercise_id,
+           exercise_name,
+           completed_at,
+           ROW_NUMBER() OVER (
+             PARTITION BY exercise_id
+             ORDER BY completed_at DESC, id DESC
+           ) AS recency_rank
+         FROM workout_sets
+         WHERE user_id = ?
+       )
+       SELECT exercise_id, exercise_name
+       FROM ranked_exercises
+       WHERE recency_rank = 1
+       ORDER BY completed_at DESC, id DESC`,
+    ).bind(user.id).all<StrengthExerciseRow>(),
+    database.prepare(
+      `WITH eligible_sets AS (
+         SELECT id, exercise_id, exercise_name, weight_kg, reps, completed_at
+         FROM workout_sets
+         WHERE user_id = ?
+           AND tracking_type = 'weight_reps'
+           AND weight_kg > 0
+           AND reps > 0
+       ),
+       ranked_exercises AS (
+         SELECT
+           exercise_id,
+           exercise_name,
+           completed_at,
+           ROW_NUMBER() OVER (
+             PARTITION BY exercise_id
+             ORDER BY completed_at DESC, id DESC
+           ) AS recency_rank
+         FROM eligible_sets
+       ),
+       latest_exercises AS (
+         SELECT
+           exercise_id,
+           exercise_name,
+           completed_at AS latest_completed_at
+         FROM ranked_exercises
+         WHERE recency_rank = 1
+       )
+       SELECT
+         latest_exercises.exercise_id,
+         latest_exercises.exercise_name,
+         strftime('%Y-%m-%d', eligible_sets.completed_at / 1000, 'unixepoch', '+8 hours') AS trend_date,
+         MAX(eligible_sets.weight_kg * (1 + eligible_sets.reps / 30.0)) AS estimated_one_rep_max_kg,
+         MAX(eligible_sets.weight_kg) AS actual_max_weight_kg,
+         latest_exercises.latest_completed_at
+       FROM latest_exercises
+       JOIN eligible_sets
+         ON eligible_sets.exercise_id = latest_exercises.exercise_id
+       GROUP BY latest_exercises.exercise_id, latest_exercises.exercise_name, trend_date
+       ORDER BY latest_exercises.latest_completed_at DESC, latest_exercises.exercise_id, trend_date`,
+    ).bind(user.id).all<StrengthTrendRow>(),
     database.prepare(
       "SELECT user_id, exercise_id, exercise_name, weight_kg, reps, completed_at FROM workout_sets WHERE completed_at >= ? AND tracking_type = 'weight_reps' AND weight_kg > 0 AND reps > 0",
     ).bind(fiftySixDaysAgo).all<SetRow>(),
@@ -154,7 +223,6 @@ export async function buildDashboard(user: AuthUser) {
     ).bind(user.id).all<ScheduleRevisionRow>(),
   ]);
 
-  const sets = currentSetResult.results;
   const completedSessions = completedSessionResult.results;
   const weekStart = startOfShanghaiWeek(now);
   const weeklyCount = new Set(completedSessions.filter((session) => session.completed_at >= weekStart).map((session) => session.plan_day_id ?? session.id)).size;
@@ -181,14 +249,30 @@ export async function buildDashboard(user: AuthUser) {
     return { effectiveAt: revision.effective_at, enabledWeekdays };
   });
 
-  const trendExercise = sets.at(-1)?.exercise_id ?? null;
-  const trendName = sets.at(-1)?.exercise_name ?? null;
-  const trendByDay = new Map<string, number>();
-  for (const set of sets.filter((row) => row.exercise_id === trendExercise)) {
-    const key = dateKey(set.completed_at);
-    const e1rm = set.weight_kg * (1 + set.reps / 30);
-    trendByDay.set(key, Math.max(trendByDay.get(key) ?? 0, e1rm));
+  const trendExercises: {
+    exerciseId: string;
+    exerciseName: string;
+    points: { date: string; estimatedOneRepMaxKg: number; actualMaxWeightKg: number }[];
+  }[] = strengthExerciseResult.results.map((exercise) => ({
+    exerciseId: exercise.exercise_id,
+    exerciseName: exercise.exercise_name,
+    points: [],
+  }));
+  const trendExerciseMap = new Map(trendExercises.map((exercise) => [exercise.exerciseId, exercise]));
+  for (const point of strengthTrendResult.results) {
+    let exercise = trendExerciseMap.get(point.exercise_id);
+    if (!exercise) {
+      exercise = { exerciseId: point.exercise_id, exerciseName: point.exercise_name, points: [] };
+      trendExerciseMap.set(point.exercise_id, exercise);
+      trendExercises.push(exercise);
+    }
+    exercise.points.push({
+      date: point.trend_date,
+      estimatedOneRepMaxKg: Math.round(point.estimated_one_rep_max_kg * 10) / 10,
+      actualMaxWeightKg: Math.round(point.actual_max_weight_kg * 10) / 10,
+    });
   }
+  const defaultTrend = trendExercises.find((exercise) => exercise.points.length > 0) ?? trendExercises[0] ?? null;
 
   return {
     user,
@@ -213,9 +297,10 @@ export async function buildDashboard(user: AuthUser) {
     recentWorkouts: recentWorkoutPage.workouts,
     recentWorkoutsPageInfo: recentWorkoutPage.pageInfo,
     trend: {
-      exerciseId: trendExercise,
-      exerciseName: trendName,
-      points: [...trendByDay.entries()].map(([date, value]) => ({ date, value: Math.round(value * 10) / 10 })),
+      exerciseId: defaultTrend?.exerciseId ?? null,
+      exerciseName: defaultTrend?.exerciseName ?? null,
+      points: defaultTrend?.points ?? [],
+      exercises: trendExercises,
     },
     leaderboard: buildLeaderboard(userResult.results, rankingSetResult.results, now, user.id),
     syncedAt: now,

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  INITIAL_WORKOUT_HISTORY_LIMIT,
+  WORKOUT_HISTORY_PAGE_SIZE,
   mergeWorkoutHistoryRecords,
   normalizeWorkoutHistoryPageResponse,
   type WorkoutSummary,
@@ -59,7 +61,7 @@ test("训练历史游标拒绝损坏、错误版本和越界字段", () => {
 });
 
 test("相同开始时间按 ID 倒序后可无重复地跨页", () => {
-  const fixtures = Array.from({ length: 27 }, (_, index) =>
+  const fixtures = Array.from({ length: 30 }, (_, index) =>
     workout(
       `session-${String(index + 1).padStart(2, "0")}`,
       1_785_200_000_000 - Math.floor(index / 2) * 1_000,
@@ -69,29 +71,29 @@ test("相同开始时间按 ID 倒序后可无重复地跨页", () => {
     (left, right) =>
       right.started_at - left.started_at || right.id.localeCompare(left.id),
   );
-  const firstPage = fixtures.slice(0, 6);
-  const firstCursor = firstPage.at(-1)!;
-  const remaining = fixtures.filter(
-    (item) =>
-      item.started_at < firstCursor.started_at ||
-      (item.started_at === firstCursor.started_at && item.id < firstCursor.id),
-  );
-  const secondPage = remaining.slice(0, 20);
-  const secondCursor = secondPage.at(-1)!;
-  const lastPage = remaining.filter(
-    (item) =>
-      item.started_at < secondCursor.started_at ||
-      (item.started_at === secondCursor.started_at &&
-        item.id < secondCursor.id),
-  );
+  const pages: WorkoutSummary[][] = [
+    fixtures.slice(0, INITIAL_WORKOUT_HISTORY_LIMIT),
+  ];
+  let cursor = pages[0].at(-1)!;
+  while (pages.flat().length < fixtures.length) {
+    const nextPage = fixtures
+      .filter(
+        (item) =>
+          item.started_at < cursor.started_at ||
+          (item.started_at === cursor.started_at && item.id < cursor.id),
+      )
+      .slice(0, WORKOUT_HISTORY_PAGE_SIZE);
+    pages.push(nextPage);
+    cursor = nextPage.at(-1)!;
+  }
 
-  assert.equal(firstPage.length, 6);
-  assert.equal(secondPage.length, 20);
-  assert.equal(lastPage.length, 1);
+  assert.deepEqual(
+    pages.map((page) => page.length),
+    [10, 10, 10],
+  );
   assert.equal(
-    new Set([...firstPage, ...secondPage, ...lastPage].map((item) => item.id))
-      .size,
-    27,
+    new Set(pages.flat().map((item) => item.id)).size,
+    fixtures.length,
   );
 });
 

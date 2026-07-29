@@ -8,6 +8,18 @@ export type PlanScheduleRevision = {
   enabledWeekdays: number[];
 };
 
+export function estimateOneRepMaxKg(weightKg: number, reps: number): number {
+  if (
+    !Number.isFinite(weightKg)
+    || !Number.isFinite(reps)
+    || weightKg <= 0
+    || reps <= 0
+  ) {
+    return 0;
+  }
+  return weightKg * (1 + reps / 30);
+}
+
 function dateKeyToUtcDay(date: string): number {
   return Date.parse(`${date}T00:00:00.000Z`);
 }

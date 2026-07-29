@@ -153,6 +153,7 @@ export function TrainingPlanView({ plan, saving, error, scrollerRef, initialWeek
   const targetStatusDotRef = useRef<HTMLElement>(null);
   const compactContextRef = useRef<HTMLDivElement>(null);
   const compactWeekdaysRef = useRef<HTMLElement>(null);
+  const sourceWeekdaysRef = useRef<HTMLElement>(null);
   const dayEditorRef = useRef<HTMLDivElement>(null);
   const compactPointerRef = useRef({ x: 0, y: 0, moved: false });
 
@@ -375,7 +376,7 @@ export function TrainingPlanView({ plan, saving, error, scrollerRef, initialWeek
       </header>
 
       <div className="plan-workspace">
-        <aside className="week-rail" aria-label="每周训练日">
+        <aside ref={sourceWeekdaysRef} className="week-rail" aria-label="每周训练日">
           <div className="kinetic-week-track" aria-hidden="true"><i /></div>
           <div className="week-rail-title"><span>一周安排</span><strong>{enabledDayCount} 天</strong></div>
           {weekdays.map((weekday) => {
@@ -431,7 +432,7 @@ export function TrainingPlanView({ plan, saving, error, scrollerRef, initialWeek
           </AnimatePresence>
         </motion.div>
       </div>
-      <PlanSharedTransition scrollerRef={scrollerRef} sourceIconRef={sourceIconRef} sourceLabelRef={sourceLabelRef} sourceDayNameRef={sourceDayNameRef} sourceDayEditorRef={dayEditorRef} sourceDayStatusRef={sourceDayStatusRef} sourceStatusDotRef={sourceStatusDotRef} targetIconRef={targetIconRef} targetLabelRef={targetLabelRef} targetDayNameRef={targetDayNameRef} targetDayStatusRef={targetDayStatusRef} targetStatusDotRef={targetStatusDotRef} dayName={selectedDayName} dayEnabled={selectedDay.enabled} statusState={syncState} selectionKey={selectedWeekday} direction={dayDirection} onCondensedChange={setCondensed} />
+      <PlanSharedTransition scrollerRef={scrollerRef} sourceIconRef={sourceIconRef} sourceLabelRef={sourceLabelRef} sourceDayNameRef={sourceDayNameRef} sourceDayEditorRef={dayEditorRef} sourceDayStatusRef={sourceDayStatusRef} sourceStatusDotRef={sourceStatusDotRef} sourceWeekdaysRef={sourceWeekdaysRef} targetIconRef={targetIconRef} targetLabelRef={targetLabelRef} targetDayNameRef={targetDayNameRef} targetDayStatusRef={targetDayStatusRef} targetStatusDotRef={targetStatusDotRef} targetWeekdaysRef={compactWeekdaysRef} dayName={selectedDayName} dayEnabled={selectedDay.enabled} statusState={syncState} selectionKey={selectedWeekday} direction={dayDirection} onCondensedChange={setCondensed} />
       <SetCountAdviceDialog advice={setCountAdvice} onClose={closeSetCountAdvice} />
     </section>
   );
