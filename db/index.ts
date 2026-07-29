@@ -66,6 +66,7 @@ const schemaStatements = [
     reps INTEGER NOT NULL,
     completed_at INTEGER NOT NULL
   )`,
+  "CREATE INDEX IF NOT EXISTS workout_sets_session_idx ON workout_sets (workout_session_id)",
   "CREATE INDEX IF NOT EXISTS workout_sets_user_exercise_completed_idx ON workout_sets (user_id, exercise_id, completed_at)",
   `CREATE TABLE IF NOT EXISTS training_plans (
     id TEXT PRIMARY KEY NOT NULL,

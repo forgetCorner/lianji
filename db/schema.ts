@@ -101,6 +101,7 @@ export const workoutSets = sqliteTable(
   },
   (table) => [
     uniqueIndex("workout_sets_workout_exercise_set_unique").on(table.workoutExerciseId, table.setIndex),
+    index("workout_sets_session_idx").on(table.workoutSessionId),
     index("workout_sets_user_exercise_completed_idx").on(table.userId, table.exerciseId, table.completedAt),
   ],
 );

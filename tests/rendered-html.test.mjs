@@ -401,6 +401,68 @@ test("训练统计使用全历史数据和计划版本口径", async () => {
   assert.match(styles, /\.heatmap-year-canvas \{[^}]+--heatmap-cell: 16px/);
 });
 
+test("近期训练使用三列账页布局并保持容量结果", async () => {
+  const [page, recentWorkouts, styles] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("components/recent-workouts-timeline.tsx", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
+  ]);
+
+  assert.match(page, /<RecentWorkoutsTimeline/);
+  assert.match(recentWorkouts, /className="session-date"/);
+  assert.match(recentWorkouts, /className="session-name"/);
+  assert.match(recentWorkouts, /className="session-volume"/);
+  assert.match(recentWorkouts, /className="session-meta"/);
+  assert.match(recentWorkouts, /className="session-volume-label">训练容量/);
+  assert.match(recentWorkouts, /date\.getMonth\(\) \+ 1/);
+  assert.match(recentWorkouts, /weekday\.value === \(date\.getDay\(\) \|\| 7\)/);
+  assert.match(recentWorkouts, /formatNumber\(session\.volume_kg\)\} <small>kg/);
+  assert.doesNotMatch(recentWorkouts, /session\.volume_kg\s*[?:]/);
+  assert.doesNotMatch(page, /累计 \{dashboard\.summary\.totalWorkouts\} 次训练/);
+  assert.doesNotMatch(page, /已云端同步/);
+  assert.match(styles, /\.session \{ --session-accent: var\(--lime\);[^}]+min-height: 0[^}]+grid-template-columns: 56px minmax\(0, 1fr\) max-content[^}]+grid-template-rows: auto auto/);
+  assert.match(styles, /\.session-name \{[^}]+font: 700 17px\/1\.25[^}]+text-wrap: pretty/);
+  assert.match(styles, /\.session\.orange \{ --session-accent: var\(--orange\)/);
+  assert.match(styles, /\.session\.blue \{ --session-accent: var\(--blue\)/);
+  assert.match(styles, /\.session-date strong \{ color: var\(--session-accent\)/);
+  assert.match(styles, /\.session-name \{[^}]+color: var\(--session-accent\)/);
+  assert.match(styles, /\.session-volume \{[^}]+color: var\(--session-accent\)/);
+  assert.match(styles, /\.session-meta \{[^}]+color: var\(--muted\)/);
+  assert.match(styles, /\.session-volume-label \{[^}]+color: var\(--muted\)/);
+  assert.match(styles, /\.session:last-child::before \{ display: none/);
+});
+
+test("近期训练使用游标分页、固定滚动区与轨迹续接状态", async () => {
+  const [page, recentWorkouts, dashboard, historyQuery, historyRoute, styles] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("components/recent-workouts-timeline.tsx", root), "utf8"),
+    readFile(new URL("lib/server/dashboard.ts", root), "utf8"),
+    readFile(new URL("lib/server/workout-history.ts", root), "utf8"),
+    readFile(new URL("app/api/workouts/history/route.ts", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
+  ]);
+
+  assert.match(page, /recentWorkoutsPageInfo: WorkoutHistoryPageInfo/);
+  assert.match(page, /initialPageInfo=\{dashboard\.recentWorkoutsPageInfo\}/);
+  assert.match(dashboard, /INITIAL_WORKOUT_HISTORY_LIMIT/);
+  assert.match(dashboard, /recentWorkoutsPageInfo: recentWorkoutPage\.pageInfo/);
+  assert.doesNotMatch(dashboard, /completedSessions\.slice\(0, 20\)/);
+  assert.match(historyQuery, /ORDER BY workout_sessions\.started_at DESC, workout_sessions\.id DESC/);
+  assert.match(historyQuery, /LIMIT \?/);
+  assert.match(historyRoute, /decodeWorkoutHistoryCursor/);
+  assert.match(recentWorkouts, /WORKOUT_HISTORY_PAGE_SIZE/);
+  assert.match(recentWorkouts, /cursor,/);
+  assert.match(recentWorkouts, /className={`timeline-viewport/);
+  assert.match(recentWorkouts, /正在追溯更早记录…/);
+  assert.match(recentWorkouts, /加载失败，点击重试/);
+  assert.match(recentWorkouts, /已经追溯到最早一次训练/);
+  assert.match(recentWorkouts, /newRecordIndex \* 0\.024/);
+  assert.match(recentWorkouts, /filter: "blur\(3px\)"/);
+  assert.match(styles, /\.timeline-viewport\.is-scrollable \{ height: 440px; max-height: 440px; overflow-x: hidden; overflow-y: auto/);
+  assert.match(styles, /@keyframes history-energy-trace/);
+  assert.match(styles, /prefers-reduced-motion: reduce[^}]+recent-workouts-timeline/s);
+});
+
 test("保存周计划后恢复保存前选中的星期", async () => {
   const [trainingPlan, page] = await Promise.all([
     readFile(new URL("components/training-plan-view.tsx", root), "utf8"),

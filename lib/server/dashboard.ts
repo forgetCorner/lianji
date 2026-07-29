@@ -2,20 +2,23 @@ import { ensureDatabase, getD1 } from "@/db";
 import type { AuthUser } from "@/lib/server/auth";
 import { getActivePlan, shanghaiWeekday } from "@/lib/server/plans";
 import { finalizeExpiredPlanWorkouts } from "@/lib/server/workouts";
+import { getWorkoutHistoryPage } from "@/lib/server/workout-history";
 import { calculateScheduledTrainingStreak, countActiveWeeks } from "@/lib/training-summary-domain";
+import { INITIAL_WORKOUT_HISTORY_LIMIT } from "@/lib/workout-history";
 
-type SessionRow = {
+type CompletedSessionRow = {
   id: string;
-  user_id: string;
-  plan_name: string;
-  started_at: number;
-  completed_at: number | null;
-  duration_seconds: number;
-  set_count: number;
-  volume_kg: number;
+  completed_at: number;
   plan_day_id: string | null;
   training_date: string | null;
   workout_type: string;
+};
+
+type ActivityRow = {
+  activity_date: string;
+  plan_name: string;
+  session_count: number;
+  volume_kg: number;
 };
 
 type SetRow = {
@@ -105,16 +108,37 @@ export async function buildDashboard(user: AuthUser) {
   const now = Date.now();
   const yearAgo = now - 366 * 24 * 60 * 60 * 1000;
   const fiftySixDaysAgo = now - 56 * 24 * 60 * 60 * 1000;
-  const [sessionResult, currentSetResult, rankingSetResult, userResult, scheduleRevisionResult] = await Promise.all([
+  const [
+    recentWorkoutPage,
+    completedSessionResult,
+    activityResult,
+    currentSetResult,
+    rankingSetResult,
+    userResult,
+    scheduleRevisionResult,
+  ] = await Promise.all([
+    getWorkoutHistoryPage(user.id, { limit: INITIAL_WORKOUT_HISTORY_LIMIT }),
     database.prepare(
-      `SELECT workout_sessions.id, workout_sessions.user_id, workout_sessions.plan_name, workout_sessions.started_at,
-        workout_sessions.completed_at, workout_sessions.duration_seconds, COUNT(workout_sets.id) AS set_count,
-        COALESCE(SUM(workout_sets.weight_kg * workout_sets.reps), 0) AS volume_kg, workout_sessions.plan_day_id,
-        workout_sessions.training_date, workout_sessions.workout_type
-       FROM workout_sessions LEFT JOIN workout_sets ON workout_sets.workout_session_id = workout_sessions.id
-       WHERE workout_sessions.user_id = ?
-       GROUP BY workout_sessions.id ORDER BY workout_sessions.started_at DESC`,
-    ).bind(user.id).all<SessionRow>(),
+      `SELECT id, completed_at, plan_day_id, training_date, workout_type
+       FROM workout_sessions
+       WHERE user_id = ? AND completed_at IS NOT NULL
+       ORDER BY completed_at`,
+    ).bind(user.id).all<CompletedSessionRow>(),
+    database.prepare(
+      `SELECT
+         COALESCE(
+           workout_sessions.training_date,
+           strftime('%Y-%m-%d', workout_sessions.completed_at / 1000, 'unixepoch', '+8 hours')
+         ) AS activity_date,
+         workout_sessions.plan_name,
+         COUNT(DISTINCT workout_sessions.id) AS session_count,
+         COALESCE(SUM(workout_sets.weight_kg * workout_sets.reps), 0) AS volume_kg
+       FROM workout_sessions
+       LEFT JOIN workout_sets ON workout_sets.workout_session_id = workout_sessions.id
+       WHERE workout_sessions.user_id = ? AND workout_sessions.completed_at IS NOT NULL
+       GROUP BY 1, workout_sessions.plan_name
+       ORDER BY activity_date`,
+    ).bind(user.id).all<ActivityRow>(),
     database.prepare(
       "SELECT user_id, exercise_id, exercise_name, weight_kg, reps, completed_at FROM workout_sets WHERE user_id = ? AND completed_at >= ? AND tracking_type = 'weight_reps' AND weight_kg > 0 AND reps > 0 ORDER BY completed_at",
     ).bind(user.id, yearAgo).all<SetRow>(),
@@ -130,23 +154,21 @@ export async function buildDashboard(user: AuthUser) {
     ).bind(user.id).all<ScheduleRevisionRow>(),
   ]);
 
-  const sessions = sessionResult.results;
   const sets = currentSetResult.results;
-  const completedSessions = sessions.filter((session) => session.completed_at);
+  const completedSessions = completedSessionResult.results;
   const weekStart = startOfShanghaiWeek(now);
-  const weeklyCount = new Set(completedSessions.filter((session) => session.completed_at! >= weekStart).map((session) => session.plan_day_id ?? session.id)).size;
-  const completedDates = completedSessions.map((session) => session.training_date ?? dateKey(session.completed_at!));
+  const weeklyCount = new Set(completedSessions.filter((session) => session.completed_at >= weekStart).map((session) => session.plan_day_id ?? session.id)).size;
+  const completedDates = completedSessions.map((session) => session.training_date ?? dateKey(session.completed_at));
   const completedPlanDates = completedSessions
     .filter((session) => session.workout_type === "plan")
-    .map((session) => session.training_date ?? dateKey(session.completed_at!));
+    .map((session) => session.training_date ?? dateKey(session.completed_at));
   const activity = new Map<string, { count: number; volumeKg: number; planNames: string[] }>();
-  for (const session of completedSessions) {
-    const key = session.training_date ?? dateKey(session.completed_at!);
-    const current = activity.get(key) ?? { count: 0, volumeKg: 0, planNames: [] };
-    current.count += 1;
-    current.volumeKg += session.volume_kg;
-    if (!current.planNames.includes(session.plan_name)) current.planNames.push(session.plan_name);
-    activity.set(key, current);
+  for (const row of activityResult.results) {
+    const current = activity.get(row.activity_date) ?? { count: 0, volumeKg: 0, planNames: [] };
+    current.count += row.session_count;
+    current.volumeKg += row.volume_kg;
+    if (!current.planNames.includes(row.plan_name)) current.planNames.push(row.plan_name);
+    activity.set(row.activity_date, current);
   }
   const scheduleRevisions = scheduleRevisionResult.results.map((revision) => {
     let enabledWeekdays: number[] = [];
@@ -179,7 +201,7 @@ export async function buildDashboard(user: AuthUser) {
       totalWorkouts: completedSessions.length,
       activeWeeks: countActiveWeeks(completedDates),
     },
-    lastSession: completedSessions[0] ?? null,
+    lastSession: recentWorkoutPage.workouts[0] ?? null,
     activity: [...activity.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([date, entry]) => ({
@@ -188,7 +210,8 @@ export async function buildDashboard(user: AuthUser) {
         volumeKg: Math.round(entry.volumeKg * 10) / 10,
         planNames: entry.planNames,
       })),
-    recentWorkouts: completedSessions.slice(0, 20),
+    recentWorkouts: recentWorkoutPage.workouts,
+    recentWorkoutsPageInfo: recentWorkoutPage.pageInfo,
     trend: {
       exerciseId: trendExercise,
       exerciseName: trendName,

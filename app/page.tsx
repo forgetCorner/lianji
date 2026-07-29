@@ -7,7 +7,6 @@ import {
   ChevronDown,
   CircleAlert,
   Crown,
-  History,
   Medal,
   Settings,
   Trophy,
@@ -40,21 +39,14 @@ import { KineticPageTransition } from "@/components/kinetic-page-transition";
 import { TodaySharedTransition } from "@/components/today-shared-transition";
 import { ProfileSharedTransition } from "@/components/profile-shared-transition";
 import { TrackSelect } from "@/components/track-select";
+import { RecentWorkoutsTimeline } from "@/components/recent-workouts-timeline";
+import type { WorkoutHistoryPageInfo, WorkoutSummary } from "@/lib/workout-history";
 
 type View = "today" | "plan" | "ranking" | "profile" | "workout";
 type ExerciseSelections = Record<string, "primary" | "alternative">;
 const menuViews: View[] = ["today", "plan", "ranking", "profile"];
 
 type AuthUser = { id: string; username: string; displayName: string; createdAt: number };
-type WorkoutSummary = {
-  id: string;
-  plan_name: string;
-  started_at: number;
-  completed_at: number | null;
-  duration_seconds: number;
-  set_count: number;
-  volume_kg: number;
-};
 type LeaderboardEntry = {
   rank: number;
   name: string;
@@ -72,6 +64,7 @@ type DashboardData = {
   lastSession: WorkoutSummary | null;
   activity: { date: string; count: number; volumeKg: number; planNames: string[] }[];
   recentWorkouts: WorkoutSummary[];
+  recentWorkoutsPageInfo: WorkoutHistoryPageInfo;
   trend: { exerciseId: string | null; exerciseName: string | null; points: { date: string; value: number }[] };
   leaderboard: LeaderboardEntry[];
   syncedAt: number;
@@ -91,11 +84,6 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const payload = await response.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
   if (!response.ok) throw new ApiRequestError(payload?.error?.message ?? "请求失败，请稍后重试", response.status, payload?.error?.code);
   return payload as T;
-}
-
-function formatDuration(seconds: number): string {
-  if (!seconds) return "不足 1 分钟";
-  return `${Math.max(1, Math.round(seconds / 60))} 分钟`;
 }
 
 function formatNumber(value: number): string {
@@ -511,7 +499,12 @@ function ProfileView({ dashboard, scrollerRef, accountOpen, onAccount }: { dashb
         </div>
       </section>
       <div className="profile-progress-columns">
-        <section className="timeline"><div className="section-heading"><h2>近期训练</h2><span>已完成记录</span></div>{dashboard.recentWorkouts.length ? dashboard.recentWorkouts.map((session, index) => { const date = new Date(session.started_at); return <div className={`session ${["lime", "orange", "blue"][index % 3]}`} key={session.id}><i /><time><strong>{String(date.getDate()).padStart(2, "0")}</strong><small>{date.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</small></time><div><h3>{session.plan_name}</h3><p>{session.set_count} 组 · {formatDuration(session.duration_seconds)}</p><b>训练容量 · {formatNumber(session.volume_kg)} kg</b></div></div>; }) : <div className="data-empty"><History size={26} /><strong>还没有已完成的训练</strong><p>完成一次训练后，这里会形成你的训练时间线。</p></div>}<footer><span>累计 {dashboard.summary.totalWorkouts} 次训练</span><i aria-hidden="true" /><b>已云端同步</b></footer></section>
+        <RecentWorkoutsTimeline
+          key={`${dashboard.user.id}-${dashboard.syncedAt}`}
+          initialRecords={dashboard.recentWorkouts}
+          initialPageInfo={dashboard.recentWorkoutsPageInfo}
+          snapshotKey={dashboard.syncedAt}
+        />
         <section className="trend">
           <div className="section-heading"><div ref={rmRuleRef} className="trend-heading-title"><h2>力量趋势</h2><div className="rm-rule"><button type="button" className="rm-rule-trigger" aria-label="查看单次最大重量计算规则" aria-expanded={showRmRule} aria-controls="rm-rule-popover" onClick={() => setShowRmRule((visible) => !visible)}><CircleAlert size={15} /></button></div>{showRmRule && <><i className="rm-rule-pointer" aria-hidden="true" /><div id="rm-rule-popover" className="rm-rule-popover" role="dialog" aria-label="单次最大重量计算规则"><strong>单次最大重量如何估算</strong><p>训练重量 ×（1 + 次数 ÷ 30）</p><small>例如：20 kg 做 12 次，估算结果约为 28 kg。同一动作在同一个训练日完成多组时，只保留当天最高值作为趋势点。</small></div></>}</div><button>{dashboard.trend.exerciseName || "等待记录"} <ChevronDown size={14} /></button></div>
           <div className="trend-stats"><div><strong>{currentStrength ? formatNumber(currentStrength) : "--"} <em>kg</em></strong><span>估算单次最大重量</span></div><div><strong>{trendData.length}</strong><span>有记录的训练日</span></div><div><strong className="orange">实际</strong><span>来自训练组记录</span></div></div>

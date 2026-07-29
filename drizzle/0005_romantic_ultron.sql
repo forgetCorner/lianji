@@ -1,0 +1,1 @@
+CREATE INDEX `workout_sets_session_idx` ON `workout_sets` (`workout_session_id`);
