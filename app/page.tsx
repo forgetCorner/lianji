@@ -37,6 +37,7 @@ import { KineticIcon } from "@/components/kinetic-icons";
 import { KineticPageTransition } from "@/components/kinetic-page-transition";
 import { TodaySharedTransition } from "@/components/today-shared-transition";
 import { ProfileSharedTransition } from "@/components/profile-shared-transition";
+import { RankingSharedTransition } from "@/components/ranking-shared-transition";
 import { TrackSelect } from "@/components/track-select";
 import { RecentWorkoutsTimeline } from "@/components/recent-workouts-timeline";
 import { WorkoutHistoryPanel } from "@/components/workout-history-panel";
@@ -571,7 +572,15 @@ function ProfileView({
   );
 }
 
-function Leaderboard({ entries }: { entries: LeaderboardEntry[] }) {
+function Leaderboard({
+  entries,
+  sourceLabelRef,
+  sourceRangeRef,
+}: {
+  entries: LeaderboardEntry[];
+  sourceLabelRef: RefObject<HTMLSpanElement | null>;
+  sourceRangeRef: RefObject<HTMLSpanElement | null>;
+}) {
   const rankIcon = (rank: number) => {
     if (rank === 1) return <Crown aria-hidden="true" size={13} strokeWidth={2.2} />;
     if (rank === 2) return <Medal aria-hidden="true" size={13} strokeWidth={2.2} />;
@@ -581,7 +590,13 @@ function Leaderboard({ entries }: { entries: LeaderboardEntry[] }) {
   const rankTone = (rank: number) => rank <= 3 ? `rank-${rank}` : "rank-default";
   return (
     <section className="leaderboard">
-      <div className="section-heading"><div><h2>好友进步榜</h2><p>按相对力量进步率与训练稳定性综合排名</p></div><span>近 8 周</span></div>
+      <div className="section-heading ranking-section-heading">
+        <div>
+          <h2><span ref={sourceLabelRef}>好友排行</span></h2>
+          <p>按相对力量进步率与训练稳定性综合排名</p>
+        </div>
+        <span ref={sourceRangeRef} className="ranking-section-range">近 8 周</span>
+      </div>
       <div className="rank-list">{entries.length ? entries.map((friend) => (
         <div className={`rank-row ${rankTone(friend.rank)}`} key={`${friend.rank}-${friend.name}`}>
           <div className="rank-position">{rankIcon(friend.rank)}<b>{String(friend.rank).padStart(2, "0")}</b></div>
@@ -598,8 +613,64 @@ function Leaderboard({ entries }: { entries: LeaderboardEntry[] }) {
   );
 }
 
-function RankingView({ entries }: { entries: LeaderboardEntry[] }) {
-  return <section className="ranking-view page-view"><header className="page-header"><div><span className="eyebrow">FRIENDS / RANKING</span><h1>公平地看见进步</h1><p>不比较起点，只比较每个人相对自己的成长。</p></div><KineticIcon kind="ranking" active size={52} className="header-icon" /></header><div className="ranking-layout"><Leaderboard entries={entries} /><aside className="ranking-method"><span className="eyebrow">HOW IT WORKS</span><h2>不直接按重量排名</h2><p>性别、体重、初始力量都会影响绝对重量。练迹使用前后两个 28 天窗口的个人力量变化和训练稳定性计算榜单。</p><dl><div><dt>70%</dt><dd>相对力量进步</dd></div><div><dt>30%</dt><dd>训练稳定性</dd></div></dl></aside></div></section>;
+function RankingView({ entries, scrollerRef }: { entries: LeaderboardEntry[]; scrollerRef: RefObject<HTMLDivElement | null> }) {
+  const sourceIconRef = useRef<HTMLSpanElement>(null);
+  const sourceLabelRef = useRef<HTMLSpanElement>(null);
+  const sourceRangeRef = useRef<HTMLSpanElement>(null);
+  const targetIconRef = useRef<HTMLSpanElement>(null);
+  const targetLabelRef = useRef<HTMLSpanElement>(null);
+  const targetRangeRef = useRef<HTMLSpanElement>(null);
+
+  return (
+    <section className="ranking-view page-view" data-testid="ranking-view">
+      <div className="ranking-compact-shell" aria-hidden="true">
+        <div className="ranking-compact-bar">
+          <span ref={targetIconRef} className="ranking-compact-icon-target" />
+          <span ref={targetLabelRef} className="ranking-compact-label-target">好友排行</span>
+          <span ref={targetRangeRef} className="ranking-compact-range-target">近 8 周</span>
+        </div>
+      </div>
+
+      <header className="ranking-hero-header">
+        <div className="ranking-hero-identity">
+          <span ref={sourceIconRef} className="ranking-header-icon">
+            <KineticIcon kind="ranking" active size={48} />
+          </span>
+          <div className="ranking-hero-copy">
+            <h1>公平地看见进步</h1>
+            <p>不比较起点，只比较每个人相对自己的成长。</p>
+          </div>
+        </div>
+      </header>
+
+      <div className="ranking-layout">
+        <Leaderboard
+          entries={entries}
+          sourceLabelRef={sourceLabelRef}
+          sourceRangeRef={sourceRangeRef}
+        />
+        <aside className="ranking-method">
+          <span className="eyebrow">HOW IT WORKS</span>
+          <h2>不直接按重量排名</h2>
+          <p>性别、体重、初始力量都会影响绝对重量。练迹使用前后两个 28 天窗口的个人力量变化和训练稳定性计算榜单。</p>
+          <dl>
+            <div><dt>70%</dt><dd>相对力量进步</dd></div>
+            <div><dt>30%</dt><dd>训练稳定性</dd></div>
+          </dl>
+        </aside>
+      </div>
+
+      <RankingSharedTransition
+        scrollerRef={scrollerRef}
+        sourceIconRef={sourceIconRef}
+        sourceLabelRef={sourceLabelRef}
+        sourceRangeRef={sourceRangeRef}
+        targetIconRef={targetIconRef}
+        targetLabelRef={targetLabelRef}
+        targetRangeRef={targetRangeRef}
+      />
+    </section>
+  );
 }
 
 function AccountDialog({ user, dashboard, onClose, onAuthenticated, onLoggedOut }: { user: AuthUser | null; dashboard: DashboardData | null; onClose: () => void; onAuthenticated: (user: AuthUser) => void; onLoggedOut: () => void }) {
@@ -946,10 +1017,12 @@ export default function Home() {
   useEffect(() => {
     appContentRef.current?.style.setProperty("--header-collapse", "0");
     appContentRef.current?.style.setProperty("--profile-header-collapse", "0");
+    appContentRef.current?.style.setProperty("--ranking-header-collapse", "0");
     appContentRef.current?.style.setProperty("--plan-header-collapse", "0");
     appContentRef.current?.style.setProperty("--plan-context-collapse", "0");
     if (appContentRef.current) appContentRef.current.dataset.headerCondensed = "false";
     if (appContentRef.current) appContentRef.current.dataset.profileHeaderCondensed = "false";
+    if (appContentRef.current) appContentRef.current.dataset.rankingHeaderCondensed = "false";
     if (appContentRef.current) appContentRef.current.dataset.planHeaderCondensed = "false";
     if (appContentRef.current) appContentRef.current.dataset.planContextCondensed = "false";
     appContentRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -1115,7 +1188,7 @@ export default function Home() {
     : view === "today" ? <TodayView dashboard={dashboard} activeWorkout={activeWorkout} scrollerRef={appContentRef} selections={todaySelections} setSelections={setTodaySelections} onPlan={() => navigateView("plan")} error={workoutError} />
     : view === "plan" ? <TrainingPlanView key={dashboard.plan.version} plan={dashboard.plan} scrollerRef={appContentRef} initialWeekday={planWeekday} onWeekdayChange={setPlanWeekday} onSave={savePlan} saving={saving} error={workoutError} />
     : view === "workout" && activeWorkout && currentWorkoutExercise ? <ActiveWorkoutView workout={activeWorkout} exercise={currentWorkoutExercise} onBack={() => setView("today")} onSaveSet={saveSet} onFinishExercise={(skipped) => finishExercise(currentWorkoutExercise.id, skipped)} saving={saving} error={workoutError} />
-    : view === "ranking" ? <RankingView entries={dashboard.leaderboard} />
+    : view === "ranking" ? <RankingView entries={dashboard.leaderboard} scrollerRef={appContentRef} />
     : <ProfileView dashboard={dashboard} scrollerRef={appContentRef} accountOpen={accountOpen} onAccount={() => setAccountOpen(true)} onOpenHistory={openProfileHistory} historyTriggerRef={profileHistoryTriggerRef} />;
   const showMobileNav = view !== "workout" && Boolean(user);
 

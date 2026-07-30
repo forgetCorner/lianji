@@ -6,7 +6,7 @@ const root = new URL("../", import.meta.url);
 
 test("生产构建包含练迹页面与真实数据 API", async () => {
   await access(new URL("dist/server/index.js", root));
-  const [page, layout, styles, hosting, visuals, bootSequence, kineticField, pageTransition, planTransition, kineticScene, kineticShaders, kineticIcons, trackSelect, trainingPlan, trainingDayStatus, packageJson, favicon] = await Promise.all([
+  const [page, layout, styles, hosting, visuals, bootSequence, kineticField, pageTransition, planTransition, rankingTransition, kineticScene, kineticShaders, kineticIcons, trackSelect, trainingPlan, trainingDayStatus, packageJson, favicon] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
     readFile(new URL("app/layout.tsx", root), "utf8"),
     readFile(new URL("app/globals.css", root), "utf8"),
@@ -16,6 +16,7 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
     readFile(new URL("components/kinetic-field.tsx", root), "utf8"),
     readFile(new URL("components/kinetic-page-transition.tsx", root), "utf8"),
     readFile(new URL("components/plan-shared-transition.tsx", root), "utf8"),
+    readFile(new URL("components/ranking-shared-transition.tsx", root), "utf8"),
     readFile(new URL("lib/visual/kinetic-scene.ts", root), "utf8"),
     readFile(new URL("lib/visual/kinetic-shaders.ts", root), "utf8"),
     readFile(new URL("components/kinetic-icons.tsx", root), "utf8"),
@@ -50,7 +51,37 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(styles, /\.rank-row\.rank-3 \.rank-position svg,[^}]+\.rank-row\.rank-3 \.rank-copy > strong[^}]+color: var\(--blue\)/);
   assert.match(styles, /\.rank-row\.rank-default \.rank-position b,[^}]+\.rank-row\.rank-default \.rank-status \{ color: var\(--text\)/);
   assert.match(styles, /\.rank-row\.rank-default \.rank-track i \{ background: var\(--text\)/);
-  assert.match(styles, /\.leaderboard \.section-heading > span \{ color: var\(--lime\)/);
+  assert.match(page, /function RankingView\(\{ entries, scrollerRef \}/);
+  assert.match(page, /<RankingView entries=\{dashboard\.leaderboard\} scrollerRef=\{appContentRef\} \/>/);
+  assert.match(page, /className="ranking-compact-shell"/);
+  assert.match(page, /className="ranking-hero-header"/);
+  assert.match(page, /className="ranking-hero-identity"/);
+  assert.match(page, /<h1>公平地看见进步<\/h1>/);
+  assert.match(page, /<h2><span ref=\{sourceLabelRef\}>好友排行<\/span><\/h2>/);
+  assert.match(page, /ref=\{sourceRangeRef\} className="ranking-section-range">近 8 周<\/span>/);
+  assert.doesNotMatch(page, /FRIENDS \/ RANKING/);
+  assert.doesNotMatch(page, /综合排名<\/h2>/);
+  assert.equal(page.match(/近 8 周/g)?.length, 2);
+  assert.match(page, /<RankingSharedTransition[\s\S]+sourceIconRef=\{sourceIconRef\}[\s\S]+targetRangeRef=\{targetRangeRef\}/);
+  assert.match(rankingTransition, /const RANKING_HEADER_CONDENSED_THRESHOLD = 0\.72/);
+  assert.match(rankingTransition, /const getCollapseDistance = \(\) => mobileViewport\.matches \? 132 : 150/);
+  assert.match(rankingTransition, /scroller\.style\.setProperty\("--ranking-header-collapse", progress\.toFixed\(4\)\)/);
+  assert.match(rankingTransition, /scroller\.dataset\.rankingHeaderCondensed = condensed \? "true" : "false"/);
+  assert.match(rankingTransition, /const travelProgress = smoothstep\(clamp\([\s\S]+progress - 0\.08[\s\S]+RANKING_HEADER_CONDENSED_THRESHOLD - 0\.08/);
+  assert.match(rankingTransition, /const resizeObserver = new ResizeObserver\(requestMeasure\)/);
+  assert.match(rankingTransition, /document\.fonts\.ready\.then\(requestMeasure\)/);
+  assert.match(rankingTransition, /window\.requestAnimationFrame\(update\)/);
+  assert.doesNotMatch(rankingTransition, /touchmove|wheel|spring|rubber|snap/i);
+  assert.match(styles, /\.ranking-compact-bar \{[^}]+height: var\(--compact-row-height\)[^}]+grid-template-columns: var\(--compact-leading-size\)/);
+  assert.match(styles, /\.ranking-compact-icon-target \{ width: var\(--compact-leading-size\); height: var\(--compact-leading-size\)/);
+  assert.match(styles, /\.ranking-hero-copy h1 \{[^}]+var\(--ranking-header-collapse\)/);
+  assert.match(styles, /\.ranking-header-icon \{ width: 48px; height: 48px/);
+  assert.match(styles, /\.ranking-section-heading > \.ranking-section-range \{ min-height: 24px;[^}]+display: inline-flex; align-items: center/);
+  assert.match(styles, /\.ranking-hero-header \{ min-height: 104px; padding: 20px 0 8px; \}/);
+  assert.match(styles, /\.ranking-layout \{ display: block; padding-top: 16px; \}/);
+  assert.match(styles, /data-ranking-header-condensed="true"\] \.ranking-compact-bar::before \{ opacity: 1/);
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]+data-ranking-header-condensed="true"/);
+  assert.doesNotMatch(styles, /\.leaderboard \.section-heading > span/);
   assert.match(layout, /<html lang="zh-CN" className=\{`\$\{notoSans\.variable\} \$\{robotoMono\.variable\}`\}>/);
   assert.doesNotMatch(layout, /Saira_Condensed/);
   assert.match(styles, /--font-mono: var\(--font-roboto-mono\)/);
@@ -87,7 +118,7 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.doesNotMatch(styles, /\.weekly-progress > div \{[^}]+repeat\(3/);
   assert.match(page, /profile-backdrop.+onClick=/);
   assert.doesNotMatch(page, /profile-backdrop.+onMouseDown=/);
-  assert.equal(page.match(/<Leaderboard /g)?.length, 1);
+  assert.equal(page.match(/<Leaderboard\s/g)?.length, 1);
   assert.match(styles, /grid-template-columns: repeat\(4, 1fr\)/);
   assert.match(styles, /profile-drawer/);
   assert.match(page, /profile-sheet-handle/);
