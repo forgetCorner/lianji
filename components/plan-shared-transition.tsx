@@ -58,9 +58,13 @@ const mix = (from: number, to: number, progress: number) => from + (to - from) *
 const smoothstep = (progress: number) => progress * progress * (3 - 2 * progress);
 const PLAN_HEADER_CONDENSED_THRESHOLD = 0.72;
 const PLAN_HEADER_SNAP_EPSILON = 0.75;
-const CONTENT_RUBBER_BAND_COEFFICIENT = 0.36;
-const CONTENT_SPRING_FREQUENCY = 14;
-const TOUCH_SCROLL_IDLE_MS = 160;
+const CONTENT_RUBBER_BAND_COEFFICIENT = 0.46;
+const CONTENT_FORCE_PROJECTION_FREQUENCY = 5.8;
+const CONTENT_RETURN_BASE_FREQUENCY = 9;
+const CONTENT_RETURN_INTENSITY_SLOWDOWN = 0.22;
+const CONTENT_RETURN_DAMPING_RATIO = 0.68;
+const TOUCH_SCROLL_IDLE_MS = 180;
+const SNAP_UNLOCK_DELAY_MS = 48;
 const WHEEL_GESTURE_IDLE_MS = 160;
 
 function readElementTranslation(element: HTMLElement | null) {
@@ -178,13 +182,6 @@ export function PlanSharedTransition({
     let readinessFrame = 0;
     const selectionChanged = previousSelectionRef.current !== selectionKey;
     const selectionAnimations: Animation[] = [];
-    let contentMotionFrame = 0;
-    let contentRubberBandOffset = 0;
-    let contentRubberBandTarget = 0;
-    let contentRubberBandVelocity = 0;
-    let contentRubberBandFrameTime = 0;
-    let contentRubberBandDimension = 1;
-    let touchRubberBandDistance = 0;
     previousSelectionRef.current = selectionKey;
 
     const setIdentitySourceVisibility = (visible: boolean) => {
@@ -563,7 +560,9 @@ export function PlanSharedTransition({
       readinessFrame = window.requestAnimationFrame(checkPageTransitionReady);
     };
 
-    const getHeaderSnapScrollTop = () => getCollapseDistance() * PLAN_HEADER_CONDENSED_THRESHOLD;
+    const getHeaderSnapScrollTop = () => Math.ceil(
+      getCollapseDistance() * PLAN_HEADER_CONDENSED_THRESHOLD,
+    );
     const getSnapSide = (scrollTop: number, snapScrollTop: number) => {
       if (scrollTop < snapScrollTop - PLAN_HEADER_SNAP_EPSILON) return -1;
       if (scrollTop > snapScrollTop + PLAN_HEADER_SNAP_EPSILON) return 1;
@@ -574,144 +573,236 @@ export function PlanSharedTransition({
       else window.scrollTo({ top: scrollTop, left: window.scrollX, behavior: "auto" });
       requestUpdate();
     };
-    const preventGestureScroll = (event: TouchEvent | WheelEvent) => {
-      if (event.cancelable) event.preventDefault();
-    };
-    const readContentRubberBandDimension = () => {
-      contentRubberBandDimension = Math.max(
-        1,
-        containerScrolls() ? scroller.clientHeight : window.innerHeight,
-      );
-    };
+
+    let contentRubberBandFrame = 0;
+    let contentReturnFrame = 0;
+    let contentRubberBandOffset = 0;
+    let contentRubberBandTarget = 0;
+    let contentReturnVelocity = 0;
+    let contentReturnFrequency = CONTENT_RETURN_BASE_FREQUENCY;
+    let contentReturnFrameTime = 0;
+    let touchLastY = 0;
+    let touchLastTime = 0;
+    let touchVelocity = 0;
+    let touchRubberBandDistance = 0;
+    let touchGestureActive = false;
+    let touchGestureTracked = false;
+    let touchSnapSide = 0;
+    let touchSnapLocked = false;
+    let touchScrollTimer = 0;
+    let snapLockFrame = 0;
+    let snapUnlockTimer = 0;
+    let wheelGestureActive = false;
+    let wheelSnapSide = 0;
+    let wheelSnapLocked = false;
+    let wheelGestureTimer = 0;
+
     const writeContentRubberBandOffset = (offset: number) => {
       contentRubberBandOffset = offset;
       contentRegion.style.transform = `translate3d(0, ${offset.toFixed(3)}px, 0)`;
     };
-    const cancelContentMotion = () => {
-      if (contentMotionFrame) window.cancelAnimationFrame(contentMotionFrame);
-      contentMotionFrame = 0;
-    };
-    const resetContentRubberBand = () => {
-      cancelContentMotion();
+    const clearContentRubberBand = () => {
+      if (contentRubberBandFrame) window.cancelAnimationFrame(contentRubberBandFrame);
+      if (contentReturnFrame) window.cancelAnimationFrame(contentReturnFrame);
+      contentRubberBandFrame = 0;
+      contentReturnFrame = 0;
       contentRubberBandOffset = 0;
       contentRubberBandTarget = 0;
-      contentRubberBandVelocity = 0;
-      contentRubberBandFrameTime = 0;
+      contentReturnVelocity = 0;
+      contentReturnFrameTime = 0;
       touchRubberBandDistance = 0;
       contentRegion.style.removeProperty("transform");
       contentRegion.style.removeProperty("will-change");
     };
-    const flushContentRubberBand = (timestamp: number) => {
-      contentMotionFrame = 0;
-      const previousOffset = contentRubberBandOffset;
-      const elapsed = contentRubberBandFrameTime
-        ? Math.max(1, timestamp - contentRubberBandFrameTime)
-        : 0;
-      if (elapsed) {
-        const instantaneousVelocity = (contentRubberBandTarget - previousOffset) / (elapsed / 1000);
-        contentRubberBandVelocity = contentRubberBandVelocity * 0.65 + instantaneousVelocity * 0.35;
-      }
-      contentRubberBandFrameTime = timestamp;
+    const resetContentRubberBand = () => {
+      clearContentRubberBand();
+    };
+    const flushContentRubberBand = () => {
+      contentRubberBandFrame = 0;
       writeContentRubberBandOffset(contentRubberBandTarget);
+    };
+    const getContentViewportSize = () => Math.max(
+      1,
+      containerScrolls() ? scroller.clientHeight : window.innerHeight,
+    );
+    const getGestureProjectionDistance = () => (
+      Math.abs(touchVelocity)
+      * 1000
+      / (CONTENT_FORCE_PROJECTION_FREQUENCY * 4)
+    );
+    const getRubberBandDistanceForOffset = (offset: number) => {
+      const viewportSize = getContentViewportSize();
+      const boundedOffset = Math.min(Math.abs(offset), viewportSize * 0.8);
+      if (boundedOffset < 0.01) return 0;
+      const distance = (
+        boundedOffset
+        * viewportSize
+      ) / (
+        CONTENT_RUBBER_BAND_COEFFICIENT
+        * (viewportSize - boundedOffset)
+      );
+      return Math.sign(offset) * distance;
     };
     const setContentRubberBand = (attemptedScrollDistance: number) => {
       if (reducedMotion.matches) return;
-      const distance = Math.abs(attemptedScrollDistance);
+      const viewportSize = getContentViewportSize();
+      const distance = Math.abs(attemptedScrollDistance) + getGestureProjectionDistance();
       const dampedDistance = (
         distance
-        * contentRubberBandDimension
+        * viewportSize
         * CONTENT_RUBBER_BAND_COEFFICIENT
       ) / (
-        contentRubberBandDimension
+        viewportSize
         + CONTENT_RUBBER_BAND_COEFFICIENT * distance
       );
       contentRubberBandTarget = -Math.sign(attemptedScrollDistance) * dampedDistance;
       contentRegion.style.willChange = "transform";
-      if (!contentMotionFrame) contentMotionFrame = window.requestAnimationFrame(flushContentRubberBand);
+      if (!contentRubberBandFrame) contentRubberBandFrame = window.requestAnimationFrame(flushContentRubberBand);
     };
     const releaseContentRubberBand = () => {
-      cancelContentMotion();
-      if (contentRubberBandTarget !== contentRubberBandOffset) {
-        flushContentRubberBand(performance.now());
+      if (contentRubberBandFrame) {
+        window.cancelAnimationFrame(contentRubberBandFrame);
+        flushContentRubberBand();
       }
-      touchRubberBandDistance = 0;
       if (reducedMotion.matches || Math.abs(contentRubberBandOffset) < 0.1) {
-        resetContentRubberBand();
+        clearContentRubberBand();
         return;
       }
+      const viewportSize = getContentViewportSize();
+      const velocityAge = Math.max(0, performance.now() - touchLastTime) / 1000;
+      const effectiveTouchVelocity = touchVelocity * Math.exp(
+        -velocityAge * CONTENT_RETURN_BASE_FREQUENCY,
+      );
+      const gestureIntensity = (
+        Math.abs(effectiveTouchVelocity) * 0.6
+        + Math.abs(contentRubberBandOffset) / viewportSize * 3
+      );
+      const intensityResponse = 1 - Math.exp(-gestureIntensity);
+      contentReturnFrequency = CONTENT_RETURN_BASE_FREQUENCY / (
+        1 + intensityResponse * CONTENT_RETURN_INTENSITY_SLOWDOWN
+      );
+      const projectedDistance = (
+        Math.abs(touchRubberBandDistance)
+        + getGestureProjectionDistance()
+      );
+      const rubberBandSlope = (
+        viewportSize
+        * viewportSize
+        * CONTENT_RUBBER_BAND_COEFFICIENT
+      ) / (
+        viewportSize
+        + CONTENT_RUBBER_BAND_COEFFICIENT * projectedDistance
+      ) ** 2;
+      contentReturnVelocity = -effectiveTouchVelocity * 1000 * rubberBandSlope;
+      contentReturnFrameTime = 0;
 
-      const releaseOffset = contentRubberBandOffset;
-      const velocityLimit = contentRubberBandDimension * 1.5;
-      const velocityAge = contentRubberBandFrameTime
-        ? Math.max(0, performance.now() - contentRubberBandFrameTime) / 1000
-        : 0;
-      const measuredVelocity = contentRubberBandVelocity * Math.exp(-16 * velocityAge);
-      const releaseVelocity = measuredVelocity * releaseOffset > 0
-        ? clamp(measuredVelocity, -velocityLimit, velocityLimit)
-        : 0;
-      let releaseStartedAt = 0;
-      const stepRelease = (timestamp: number) => {
-        if (!releaseStartedAt) releaseStartedAt = timestamp;
-        const elapsed = (timestamp - releaseStartedAt) / 1000;
-        const decay = Math.exp(-CONTENT_SPRING_FREQUENCY * elapsed);
-        const springTerm = releaseVelocity + CONTENT_SPRING_FREQUENCY * releaseOffset;
-        const offset = (releaseOffset + springTerm * elapsed) * decay;
-        const velocity = (
-          releaseVelocity
-          - CONTENT_SPRING_FREQUENCY * springTerm * elapsed
-        ) * decay;
-        writeContentRubberBandOffset(offset);
-        if (Math.abs(offset) < 0.1 && Math.abs(velocity) < 4) {
-          resetContentRubberBand();
+      const stepContentReturn = (timestamp: number) => {
+        const elapsed = contentReturnFrameTime
+          ? Math.min((timestamp - contentReturnFrameTime) / 1000, 1 / 30)
+          : 1 / 60;
+        contentReturnFrameTime = timestamp;
+        const springAcceleration = (
+          -contentReturnFrequency * contentReturnFrequency * contentRubberBandOffset
+          - 2
+          * CONTENT_RETURN_DAMPING_RATIO
+          * contentReturnFrequency
+          * contentReturnVelocity
+        );
+        contentReturnVelocity += springAcceleration * elapsed;
+        writeContentRubberBandOffset(
+          contentRubberBandOffset + contentReturnVelocity * elapsed,
+        );
+        const restOffset = viewportSize * 0.0002;
+        const restVelocity = restOffset * contentReturnFrequency;
+        if (
+          Math.abs(contentRubberBandOffset) <= restOffset
+          && Math.abs(contentReturnVelocity) <= restVelocity
+        ) {
+          clearContentRubberBand();
           return;
         }
-        contentMotionFrame = window.requestAnimationFrame(stepRelease);
+        contentReturnFrame = window.requestAnimationFrame(stepContentReturn);
       };
-      contentMotionFrame = window.requestAnimationFrame(stepRelease);
+      contentReturnFrame = window.requestAnimationFrame(stepContentReturn);
     };
-    const playContentSnapFeedback = (snapSide: number) => {
-      if (reducedMotion.matches || snapSide === 0) return;
-      resetContentRubberBand();
-      readContentRubberBandDimension();
-      setContentRubberBand(
-        (snapSide < 0 ? 1 : -1) * contentRubberBandDimension * 0.04,
-      );
-      releaseContentRubberBand();
+    const unlockScroller = () => {
+      if (snapLockFrame) window.cancelAnimationFrame(snapLockFrame);
+      snapLockFrame = 0;
+      if (snapUnlockTimer) window.clearTimeout(snapUnlockTimer);
+      snapUnlockTimer = 0;
+      scroller.style.removeProperty("overflow-y");
+      touchSnapLocked = false;
     };
-
-    let touchLastY = 0;
-    let touchSnapSide = 0;
-    let touchSnapLocked = false;
-    let touchGestureTracked = false;
-    let touchScrollTimer = 0;
     const finishTouchGesture = () => {
-      touchGestureTracked = false;
-      if (!touchSnapLocked) touchSnapSide = 0;
       touchScrollTimer = 0;
+      if (touchGestureActive || touchSnapLocked) return;
+      touchGestureTracked = false;
+      touchSnapSide = 0;
     };
     const scheduleTouchGestureEnd = () => {
       if (touchScrollTimer) window.clearTimeout(touchScrollTimer);
       touchScrollTimer = window.setTimeout(finishTouchGesture, TOUCH_SCROLL_IDLE_MS);
     };
+    const settleTouchSnapLock = () => {
+      if (!touchSnapLocked) return;
+      releaseContentRubberBand();
+      if (snapUnlockTimer) window.clearTimeout(snapUnlockTimer);
+      snapUnlockTimer = window.setTimeout(() => {
+        unlockScroller();
+        touchGestureTracked = false;
+        touchSnapSide = 0;
+      }, SNAP_UNLOCK_DELAY_MS);
+    };
+    const lockTouchAtSnap = () => {
+      if (touchSnapLocked) return;
+      touchSnapLocked = true;
+      const snapScrollTop = getHeaderSnapScrollTop();
+      const overshoot = touchSnapSide < 0
+        ? Math.max(0, getScrollTop() - snapScrollTop)
+        : Math.min(0, getScrollTop() - snapScrollTop);
+      const projectedDistance = getGestureProjectionDistance();
+      touchRubberBandDistance = Math.sign(overshoot) * Math.max(
+        0,
+        Math.abs(getRubberBandDistanceForOffset(overshoot)) - projectedDistance,
+      );
+      contentRubberBandTarget = -overshoot;
+      contentRegion.style.willChange = "transform";
+      writeContentRubberBandOffset(contentRubberBandTarget);
+      setExactScrollTop(snapScrollTop);
+      scroller.style.overflowY = "hidden";
+      scroller.scrollTop = snapScrollTop;
+      snapLockFrame = window.requestAnimationFrame(() => {
+        snapLockFrame = 0;
+        if (!touchSnapLocked) return;
+        scroller.scrollTop = snapScrollTop;
+        requestUpdate();
+      });
+      if (!touchGestureActive) settleTouchSnapLock();
+    };
     const handleTouchStart = (event: TouchEvent) => {
       if (!mobileViewport.matches || event.touches.length !== 1) return;
+      unlockScroller();
+      resetContentRubberBand();
       if (touchScrollTimer) window.clearTimeout(touchScrollTimer);
       const snapScrollTop = getHeaderSnapScrollTop();
-      const continuingPastSnap = touchSnapLocked;
-      resetContentRubberBand();
-      readContentRubberBandDimension();
       touchLastY = event.touches[0].clientY;
+      touchLastTime = event.timeStamp || performance.now();
+      touchVelocity = 0;
+      touchGestureActive = true;
       touchGestureTracked = true;
-      touchSnapLocked = false;
-      touchSnapSide = continuingPastSnap ? 0 : getSnapSide(getScrollTop(), snapScrollTop);
+      touchSnapSide = getSnapSide(getScrollTop(), snapScrollTop);
     };
     const handleTouchMove = (event: TouchEvent) => {
       if (!mobileViewport.matches || event.touches.length !== 1) return;
       const nextY = event.touches[0].clientY;
       const deltaY = touchLastY - nextY;
+      const timestamp = event.timeStamp || performance.now();
+      const elapsed = Math.max(8, timestamp - touchLastTime);
+      touchVelocity = touchVelocity * 0.65 + (deltaY / elapsed) * 0.35;
       touchLastY = nextY;
+      touchLastTime = timestamp;
+
       if (touchSnapLocked) {
-        preventGestureScroll(event);
         touchRubberBandDistance += deltaY;
         touchRubberBandDistance = touchSnapSide < 0
           ? Math.max(0, touchRubberBandDistance)
@@ -719,30 +810,13 @@ export function PlanSharedTransition({
         setContentRubberBand(touchRubberBandDistance);
         return;
       }
-      if (touchSnapSide === 0 || Math.abs(deltaY) < 0.01) return;
-      const snapScrollTop = getHeaderSnapScrollTop();
-      const nextScrollTop = getScrollTop() + deltaY;
-      const reachesSnap = touchSnapSide < 0
-        ? nextScrollTop >= snapScrollTop
-        : nextScrollTop <= snapScrollTop;
-      if (!reachesSnap) return;
-      preventGestureScroll(event);
-      touchSnapLocked = true;
-      touchRubberBandDistance = touchSnapSide < 0
-        ? Math.max(0, nextScrollTop - snapScrollTop)
-        : Math.min(0, nextScrollTop - snapScrollTop);
-      setExactScrollTop(snapScrollTop);
-      setContentRubberBand(touchRubberBandDistance);
     };
     const handleTouchEnd = () => {
-      if (touchSnapLocked) releaseContentRubberBand();
-      scheduleTouchGestureEnd();
+      touchGestureActive = false;
+      if (touchSnapLocked) settleTouchSnapLock();
+      else scheduleTouchGestureEnd();
     };
 
-    let wheelGestureActive = false;
-    let wheelSnapSide = 0;
-    let wheelSnapLocked = false;
-    let wheelGestureTimer = 0;
     const finishWheelGesture = () => {
       wheelGestureActive = false;
       wheelSnapSide = 0;
@@ -763,45 +837,32 @@ export function PlanSharedTransition({
       }
       scheduleWheelGestureEnd();
       if (wheelSnapLocked) {
-        preventGestureScroll(event);
+        if (event.cancelable) event.preventDefault();
         return;
       }
       if (wheelSnapSide === 0) return;
-      const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-        ? 16
-        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-          ? scroller.clientHeight
-          : 1;
-      const nextScrollTop = getScrollTop() + event.deltaY * deltaScale;
+      const nextScrollTop = getScrollTop() + event.deltaY;
       const reachesSnap = wheelSnapSide < 0
         ? nextScrollTop >= snapScrollTop
         : nextScrollTop <= snapScrollTop;
       if (!reachesSnap) return;
-      preventGestureScroll(event);
+      if (event.cancelable) event.preventDefault();
       wheelSnapLocked = true;
       setExactScrollTop(snapScrollTop);
-      playContentSnapFeedback(wheelSnapSide);
     };
     const enforceTouchSnap = () => {
-      if (!mobileViewport.matches) return;
+      if (!mobileViewport.matches || touchSnapLocked || !touchGestureTracked || touchSnapSide === 0) return;
       const snapScrollTop = getHeaderSnapScrollTop();
       const scrollTop = getScrollTop();
-      if (touchSnapLocked) {
-        if (Math.abs(scrollTop - snapScrollTop) > PLAN_HEADER_SNAP_EPSILON) setExactScrollTop(snapScrollTop);
-        return;
-      }
-      if (!touchGestureTracked || touchSnapSide === 0) return;
       const reachedSnap = touchSnapSide < 0
         ? scrollTop >= snapScrollTop
         : scrollTop <= snapScrollTop;
       if (!reachedSnap) return;
-      touchSnapLocked = true;
-      touchRubberBandDistance = scrollTop - snapScrollTop;
-      setExactScrollTop(snapScrollTop);
-      setContentRubberBand(touchRubberBandDistance);
+      lockTouchAtSnap();
     };
     const handleTrackedScroll = () => {
       requestUpdate();
+      if (touchGestureTracked && !touchGestureActive && !touchSnapLocked) scheduleTouchGestureEnd();
       enforceTouchSnap();
     };
 
@@ -811,7 +872,7 @@ export function PlanSharedTransition({
     [scroller, sourceIcon, sourceLabel, sourceDayName, sourceDayStatus, sourceStatusDot, sourceWeekdays, targetIcon, targetLabel, targetDayName, targetDayStatus, targetStatusDot, targetWeekdays].forEach((element) => resizeObserver.observe(element));
     scroller.addEventListener("scroll", handleTrackedScroll, { passive: true });
     scroller.addEventListener("touchstart", handleTouchStart, { passive: true });
-    scroller.addEventListener("touchmove", handleTouchMove, { passive: false });
+    scroller.addEventListener("touchmove", handleTouchMove, { passive: true });
     scroller.addEventListener("touchend", handleTouchEnd, { passive: true });
     scroller.addEventListener("touchcancel", handleTouchEnd, { passive: true });
     scroller.addEventListener("wheel", handleWheel, { passive: false });
@@ -848,8 +909,11 @@ export function PlanSharedTransition({
       if (frame) window.cancelAnimationFrame(frame);
       if (readinessFrame) window.cancelAnimationFrame(readinessFrame);
       if (touchScrollTimer) window.clearTimeout(touchScrollTimer);
+      if (snapLockFrame) window.cancelAnimationFrame(snapLockFrame);
+      if (snapUnlockTimer) window.clearTimeout(snapUnlockTimer);
       if (wheelGestureTimer) window.clearTimeout(wheelGestureTimer);
       selectionAnimations.forEach((animation) => animation.cancel());
+      unlockScroller();
       resetContentRubberBand();
       targetStatusDot.style.visibility = "";
       targetDayStatus.style.visibility = "";
