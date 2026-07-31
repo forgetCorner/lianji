@@ -7,7 +7,7 @@ const root = new URL("../", import.meta.url);
 test("生产构建包含练迹页面与真实数据 API", async () => {
   await access(new URL("dist/server/index.js", root));
   await access(new URL("public/assets/dotlottie-player.wasm", root));
-  const [page, layout, styles, hosting, visuals, cardioRunner, cardioRunnerAsset, coreTrainer, coreTrainerAsset, activeWorkout, bootSequence, kineticField, pageTransition, planTransition, rankingTransition, kineticScene, kineticShaders, kineticIcons, trackSelect, trainingPlan, trainingDayStatus, packageJson, favicon] = await Promise.all([
+  const [page, layout, styles, hosting, visuals, cardioRunner, cardioRunnerAsset, coreTrainer, coreTrainerAsset, activeWorkout, bootSequence, kineticField, pageTransition, planTransition, rankingTransition, kineticScene, kineticShaders, kineticIcons, mobileNav, mobileGesture, trackSelect, trainingPlan, trainingDayStatus, packageJson, favicon] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
     readFile(new URL("app/layout.tsx", root), "utf8"),
     readFile(new URL("app/globals.css", root), "utf8"),
@@ -26,6 +26,8 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
     readFile(new URL("lib/visual/kinetic-scene.ts", root), "utf8"),
     readFile(new URL("lib/visual/kinetic-shaders.ts", root), "utf8"),
     readFile(new URL("components/kinetic-icons.tsx", root), "utf8"),
+    readFile(new URL("components/mobile-liquid-glass-nav.tsx", root), "utf8"),
+    readFile(new URL("lib/mobile-navigation-gesture.ts", root), "utf8"),
     readFile(new URL("components/track-select.tsx", root), "utf8"),
     readFile(new URL("components/training-plan-view.tsx", root), "utf8"),
     readFile(new URL("components/training-day-status-control.tsx", root), "utf8"),
@@ -125,7 +127,7 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(page, /profile-backdrop.+onClick=/);
   assert.doesNotMatch(page, /profile-backdrop.+onMouseDown=/);
   assert.equal(page.match(/<Leaderboard\s/g)?.length, 1);
-  assert.match(styles, /grid-template-columns: repeat\(4, 1fr\)/);
+  assert.match(styles, /\.mobile-nav \{[^}]+grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
   assert.match(styles, /profile-drawer/);
   assert.match(page, /profile-sheet-handle/);
   assert.doesNotMatch(page, /profile-drawer-stats/);
@@ -144,11 +146,12 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(styles, /\.boot-sequence/);
   assert.match(styles, /\.kinetic-field-layer[^}]+pointer-events: none/);
   assert.match(styles, /prefers-reduced-motion: reduce/);
-  assert.match(styles, /app-runtime\.has-mobile-nav \.app-content \{ height: calc\(100svh - var\(--mobile-nav-height\)\)/);
-  assert.match(styles, /\.today-view \{ padding-bottom: var\(--mobile-action-space\)/);
-  assert.match(styles, /\.plan-view \{ padding-inline: 18px; padding-bottom: 0/);
+  assert.match(styles, /app-runtime\.has-mobile-nav \.app-content \{ height: 100svh/);
+  assert.match(styles, /\.today-view \{ padding-bottom: calc\(var\(--mobile-action-space\) \+ var\(--mobile-nav-height\)\)/);
+  assert.match(styles, /\.ranking-view, \.profile-view \{ padding-bottom: calc\(24px \+ var\(--mobile-nav-height\)\)/);
+  assert.match(styles, /\.plan-view \{ padding-inline: 18px; padding-bottom: var\(--mobile-nav-height\)/);
   assert.match(styles, /\.day-editor \{ padding: 20px 0 0/);
-  assert.match(styles, /\.plan-save-bar \{ bottom: 0; justify-content: center/);
+  assert.match(styles, /\.plan-save-bar \{ bottom: var\(--mobile-nav-height\); justify-content: center/);
   assert.match(styles, /data-header-condensed="true"\] \.today-compact-bar \{ pointer-events: auto/);
   assert.match(styles, /data-profile-header-condensed="true"\] \.profile-compact-bar \{ pointer-events: auto/);
   assert.match(styles, /data-plan-header-condensed="true"\] \.plan-compact-context \{ pointer-events: auto/);
@@ -419,6 +422,9 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(kineticField, /kinetic-flight-end/);
   assert.match(pageTransition, /suspended = false/);
   assert.match(pageTransition, /staticTransition/);
+  assert.match(pageTransition, /MOBILE_TRANSITION_QUERY = "\(max-width: 760px\)"/);
+  assert.match(pageTransition, /mode=\{compactTransition \? "sync" : "wait"\}/);
+  assert.match(pageTransition, /compactTransition \? 0\.22 : 0\.58/);
   assert.match(pageTransition, /transitionEnd: \{ transform: "none", filter: "none", clipPath: "none" \}/);
   assert.match(planTransition, /export function PlanSharedTransition/);
   assert.match(planTransition, /--plan-header-collapse/);
@@ -432,6 +438,39 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(kineticScene, /LINK_STATUS/);
   assert.match(kineticShaders, /energyRibbon/);
   assert.match(kineticIcons, /export function KineticIcon/);
+  assert.match(page, /import \{ MobileLiquidGlassNav, type MobileNavView \}/);
+  assert.doesNotMatch(page, /function MobileNav\(/);
+  assert.match(page, /const mobileNavView: MobileNavView \| null = view === "workout" \? null : view/);
+  assert.match(page, /const showMobileNav = view !== "workout" && Boolean\(user\)/);
+  assert.match(page, /<MobileLiquidGlassNav view=\{mobileNavView\} setView=\{navigateView\} \/>/);
+  assert.match(mobileNav, /export function MobileLiquidGlassNav/);
+  assert.match(mobileNav, /\{ view: "today", label: "今日", icon: "today" \}/);
+  assert.match(mobileNav, /\{ view: "plan", label: "计划", icon: "plan" \}/);
+  assert.match(mobileNav, /\{ view: "ranking", label: "排行", icon: "ranking" \}/);
+  assert.match(mobileNav, /\{ view: "profile", label: "我的", icon: "profile" \}/);
+  assert.match(mobileNav, /event\.currentTarget\.setPointerCapture\(event\.pointerId\)/);
+  assert.match(mobileNav, /menuIndexWithHysteresis/);
+  assert.match(mobileNav, /magnetizedX/);
+  assert.match(mobileNav, /gestureRef\.current = null[\s\S]+releasePointerCapture\(event\.pointerId\)/);
+  assert.match(mobileNav, /onPointerCancel=\{handlePointerCancel\}/);
+  assert.match(mobileNav, /onLostPointerCapture=\{handleLostPointerCapture\}/);
+  assert.match(mobileNav, /onClickCapture=\{handleClickCapture\}/);
+  assert.match(mobileNav, /aria-current=\{active \? "page" : undefined\}/);
+  assert.match(mobileNav, /className="mobile-nav-selection"[\s\S]+aria-hidden="true"/);
+  assert.match(mobileNav, /x: prefersReducedMotion \|\| interacting \? rawX : springX/);
+  assert.match(mobileNav, /settleToIndex\(targetIndex, false, true\)/);
+  assert.match(mobileNav, /navRef\.current\?\.contains\(focusedElement\)/);
+  assert.match(mobileGesture, /export function nearestMenuIndex/);
+  assert.match(mobileGesture, /export function gestureIntent/);
+  assert.match(mobileGesture, /export function menuIndexWithHysteresis/);
+  assert.match(mobileGesture, /export function magnetizedX/);
+  assert.match(styles, /\.mobile-nav-glass-base \{[^}]+backdrop-filter: blur\(22px\)[^}]+-webkit-backdrop-filter: blur\(22px\)/);
+  assert.match(styles, /\.mobile-nav-selection \{[^}]+height: calc\(68px - var\(--mobile-nav-inset\) \* 2\)[^}]+border-radius: calc\(var\(--mobile-nav-radius\) - var\(--mobile-nav-inset\)\)/);
+  assert.doesNotMatch(styles, /\.mobile-nav-selection \{[^}]+backdrop-filter: blur/);
+  assert.match(styles, /\.mobile-nav\.is-interacting \.nav-button\.is-active:not\(\.is-preview\)/);
+  assert.match(styles, /@supports not \(\(backdrop-filter: blur\(1px\)\) or \(-webkit-backdrop-filter: blur\(1px\)\)\)/);
+  assert.match(styles, /@media \(max-width: 760px\) and \(prefers-reduced-transparency: reduce\)/);
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]+\.mobile-nav-selection/);
   assert.match(trackSelect, /export function TrackSelect/);
   assert.match(trackSelect, /export function ExercisePicker/);
   assert.match(trackSelect, /createPortal/);
@@ -452,6 +491,7 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(styles, /\.exercise-picker-categories button\.is-active::after \{ opacity: 1/);
   assert.match(styles, /\.exercise-picker-sheet \{[^}]+grid-template-rows: auto auto auto minmax\(0,1fr\)/);
   assert.match(packageJson, /tests\/exercise-picker-category\.test\.ts/);
+  assert.match(packageJson, /tests\/mobile-navigation-gesture\.test\.ts/);
   assert.doesNotMatch(trainingPlan, /<select/);
   assert.match(trainingPlan, /<TrackSelect/);
   assert.match(trainingPlan, /<ExercisePicker/);

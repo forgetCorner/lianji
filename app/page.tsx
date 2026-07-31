@@ -35,6 +35,7 @@ import { KineticField } from "@/components/kinetic-field";
 import type { KineticIntensity, KineticMode } from "@/lib/visual/kinetic-scene";
 import { KineticIcon } from "@/components/kinetic-icons";
 import { KineticPageTransition } from "@/components/kinetic-page-transition";
+import { MobileLiquidGlassNav, type MobileNavView } from "@/components/mobile-liquid-glass-nav";
 import { TodaySharedTransition } from "@/components/today-shared-transition";
 import { ProfileSharedTransition } from "@/components/profile-shared-transition";
 import { RankingSharedTransition } from "@/components/ranking-shared-transition";
@@ -148,17 +149,6 @@ function Sidebar({ view, setView, onAccount, user }: { view: View; setView: (vie
         <small>{user?.displayName || "账号"}</small>
       </button>
     </aside>
-  );
-}
-
-function MobileNav({ view, setView }: { view: View; setView: (view: View) => void }) {
-  return (
-    <nav className="mobile-nav" aria-label="移动端主导航">
-      <NavButton active={view === "today" || view === "workout"} label="今日" onClick={() => setView("today")} icon="today" />
-      <NavButton active={view === "plan"} label="计划" onClick={() => setView("plan")} icon="plan" />
-      <NavButton active={view === "ranking"} label="排行" onClick={() => setView("ranking")} icon="ranking" />
-      <NavButton active={view === "profile"} label="我的" onClick={() => setView("profile")} icon="profile" />
-    </nav>
   );
 }
 
@@ -1190,6 +1180,7 @@ export default function Home() {
     : view === "workout" && activeWorkout && currentWorkoutExercise ? <ActiveWorkoutView workout={activeWorkout} exercise={currentWorkoutExercise} onBack={() => setView("today")} onSaveSet={saveSet} onFinishExercise={(skipped) => finishExercise(currentWorkoutExercise.id, skipped)} saving={saving} error={workoutError} />
     : view === "ranking" ? <RankingView entries={dashboard.leaderboard} scrollerRef={appContentRef} />
     : <ProfileView dashboard={dashboard} scrollerRef={appContentRef} accountOpen={accountOpen} onAccount={() => setAccountOpen(true)} onOpenHistory={openProfileHistory} historyTriggerRef={profileHistoryTriggerRef} />;
+  const mobileNavView: MobileNavView | null = view === "workout" ? null : view;
   const showMobileNav = view !== "workout" && Boolean(user);
 
   return (
@@ -1201,7 +1192,9 @@ export default function Home() {
         <div ref={appContentRef} className={`app-content ${view === "workout" ? "is-workout" : ""}`.trim()}>
           {view === "workout" ? content : <KineticPageTransition pageKey={`${view}-${checkingSession ? "checking" : user ? "ready" : "guest"}`} direction={pageDirection} suspended={bootVisible} floatingAction={todayFloatingAction} floatingRoot={todayActionRoot}>{content}</KineticPageTransition>}
         </div>
-        {showMobileNav && <MobileNav view={view} setView={navigateView} />}
+        {showMobileNav && mobileNavView && (
+          <MobileLiquidGlassNav view={mobileNavView} setView={navigateView} />
+        )}
         {resting && <WorkoutRestOverlay exercise={resting.exercise} completedSet={resting.completedSet} onContinue={() => setResting(null)} onFinish={() => finishExercise(resting.exercise.id)} />}
         {(accountOpen || !user) && !checkingSession && <AccountDialog user={user} dashboard={dashboard} onClose={() => setAccountOpen(false)} onAuthenticated={(authenticatedUser) => { setUser(authenticatedUser); setAccountOpen(false); setDashboard(null); void loadDashboard(); }} onLoggedOut={() => { setUser(null); setDashboard(null); setActiveWorkout(null); setTodayWorkoutStatus("not_started"); setAccountOpen(true); setView("today"); }} />}
         {notice && <div className="sync-toast" role="status"><Check size={18} />{notice}</div>}
