@@ -3,9 +3,10 @@
 import { ArrowLeft, Check, ListEnd, ListMinus, ListX, Minus, Plus } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { exerciseCategory } from "@/lib/exercise-category";
 import { isInclineWalkExercise, type ActiveWorkout, type WorkoutExercise } from "@/lib/training";
 import { KineticIcon } from "@/components/kinetic-icons";
-import { TrackMark } from "@/components/track-visuals";
+import { ExerciseTypeMark } from "@/components/track-visuals";
 import { WorkoutSetProgress } from "@/components/workout-set-progress";
 
 export type SetInput = {
@@ -67,6 +68,7 @@ function WorkoutExercisePanel({ workout, exercise, saving, error, onSaveSet }: P
   const isWeighted = exercise.trackingType === "weight_reps";
   const isInclineWalk = isInclineWalkExercise(exercise.exerciseId);
   const durationInMinutes = durationSeconds >= 120;
+  const category = exerciseCategory(exercise.exerciseId);
 
   function completeSet() {
     onSaveSet({
@@ -91,7 +93,7 @@ function WorkoutExercisePanel({ workout, exercise, saving, error, onSaveSet }: P
           <p>{exercise.equipment || "徒手"} · {exercise.minSets === exercise.maxSets ? `${exercise.maxSets} 组` : `${exercise.minSets}–${exercise.maxSets} 组`}</p>
           <div className="focus-line"><i /><span>{exercise.muscleGroup || "全身"}</span></div>
         </div>
-        <TrackMark className="workout-watermark" state="syncing" />
+        <ExerciseTypeMark category={category} className="workout-watermark" state="syncing" />
       </div>
 
       <div className="workout-metrics">

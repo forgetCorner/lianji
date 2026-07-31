@@ -5,6 +5,8 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, RefObject } from "react";
+import { exerciseCategoryCounts, exerciseCategoryFilters, filterExerciseOptions } from "@/lib/exercise-category";
+import type { ExerciseCategoryFilter } from "@/lib/exercise-category";
 import type { ExerciseDefinition } from "@/lib/training";
 
 type SelectOption<T extends string> = {
@@ -203,30 +205,37 @@ export function ExercisePicker({ ariaLabel, value, displayValue, options, onSele
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const optionsRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
   const listboxId = useId();
   const mobile = useMobileQuery();
   const [open, setOpen] = useState(false);
   const reduceMotion = useReducedMotion();
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<ExerciseCategoryFilter>("all");
   const [activeIndex, setActiveIndex] = useState(0);
-  const filtered = useMemo(() => {
-    const keyword = query.trim().toLocaleLowerCase("zh-CN");
-    if (!keyword) return options;
-    return options.filter((option) => `${option.name} ${option.equipment} ${option.muscleGroup}`.toLocaleLowerCase("zh-CN").includes(keyword));
-  }, [options, query]);
+  const categoryCounts = useMemo(() => exerciseCategoryCounts(options), [options]);
+  const filtered = useMemo(() => filterExerciseOptions(options, query, category), [category, options, query]);
   const safeActiveIndex = Math.min(activeIndex, Math.max(0, filtered.length - 1));
   const selected = options.find((option) => option.exerciseId === value);
   const position = useAnchoredPosition(open && !mobile, triggerRef, 340, 390);
+  const resetOptionsScroll = useCallback(() => {
+    if (optionsRef.current) optionsRef.current.scrollTop = 0;
+  }, []);
   const close = useCallback(() => {
     setOpen(false);
     setQuery("");
-  }, []);
+    setCategory("all");
+    resetOptionsScroll();
+  }, [resetOptionsScroll]);
   const openPicker = useCallback(() => {
     const selectedIndex = options.findIndex((option) => option.exerciseId === value);
+    setQuery("");
+    setCategory("all");
     setActiveIndex(Math.max(0, selectedIndex));
+    resetOptionsScroll();
     setOpen(true);
-  }, [options, value]);
+  }, [options, resetOptionsScroll, value]);
   const choose = useCallback((option: ExerciseDefinition) => {
     onSelect(option.exerciseId);
     close();
@@ -267,6 +276,26 @@ export function ExercisePicker({ ariaLabel, value, displayValue, options, onSele
     }
   }
 
+  function chooseCategory(nextCategory: ExerciseCategoryFilter) {
+    setCategory(nextCategory);
+    setActiveIndex(0);
+    resetOptionsScroll();
+  }
+
+  function changeSearch(nextQuery: string) {
+    if (!query.trim() && nextQuery.trim()) setCategory("all");
+    setQuery(nextQuery);
+    setActiveIndex(0);
+    resetOptionsScroll();
+  }
+
+  function clearSearch() {
+    setQuery("");
+    setActiveIndex(0);
+    resetOptionsScroll();
+    searchRef.current?.focus();
+  }
+
   const list = <>
     <div className="exercise-picker-search"><Search size={16} /><input
       ref={searchRef}
@@ -277,10 +306,19 @@ export function ExercisePicker({ ariaLabel, value, displayValue, options, onSele
       aria-controls={listboxId}
       aria-activedescendant={filtered.length ? `${listboxId}-${safeActiveIndex}` : undefined}
       placeholder="搜索动作、器械或肌群"
-      onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
+      onChange={(event) => changeSearch(event.target.value)}
       onKeyDown={onSearchKeyDown}
-    />{query && <button type="button" aria-label="清空搜索" onClick={() => { setQuery(""); searchRef.current?.focus(); }}><X size={15} /></button>}</div>
-    <div id={listboxId} className="exercise-picker-options" role="listbox" aria-label={ariaLabel}>
+    />{query && <button type="button" aria-label="清空搜索" onClick={clearSearch}><X size={15} /></button>}</div>
+    <div className="exercise-picker-categories" role="group" aria-label="动作分类">
+      {exerciseCategoryFilters.map((item) => <button
+        type="button"
+        aria-pressed={category === item.value}
+        className={category === item.value ? "is-active" : ""}
+        key={item.value}
+        onClick={() => chooseCategory(item.value)}
+      ><span>{item.label}</span><b>{categoryCounts[item.value]}</b></button>)}
+    </div>
+    <div ref={optionsRef} id={listboxId} className="exercise-picker-options" role="listbox" aria-label={ariaLabel}>
       {filtered.length ? filtered.map((option, index) => <button
         id={`${listboxId}-${index}`}
         type="button"
@@ -292,7 +330,7 @@ export function ExercisePicker({ ariaLabel, value, displayValue, options, onSele
           if (event.pointerType === "mouse") setActiveIndex(index);
         }}
         onClick={() => choose(option)}
-      ><span><strong>{option.name}</strong><small>{[option.equipment, option.muscleGroup].filter(Boolean).join(" · ")}</small></span>{option.exerciseId === value && <Check size={16} />}</button>) : <div className="exercise-picker-empty"><strong>没有匹配动作</strong><span>换个关键词再试试。</span></div>}
+      ><span><strong>{option.name}</strong><small>{[option.equipment, option.muscleGroup].filter(Boolean).join(" · ")}</small></span>{option.exerciseId === value && <Check size={16} />}</button>) : <div className="exercise-picker-empty"><strong>{query.trim() ? "没有匹配动作" : "该分类暂无动作"}</strong><span>{query.trim() ? "换个关键词再试试。" : "可以查看其他分类或使用搜索。"}</span></div>}
     </div>
   </>;
 

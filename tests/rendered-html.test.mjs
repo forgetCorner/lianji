@@ -6,12 +6,18 @@ const root = new URL("../", import.meta.url);
 
 test("生产构建包含练迹页面与真实数据 API", async () => {
   await access(new URL("dist/server/index.js", root));
-  const [page, layout, styles, hosting, visuals, bootSequence, kineticField, pageTransition, planTransition, rankingTransition, kineticScene, kineticShaders, kineticIcons, trackSelect, trainingPlan, trainingDayStatus, packageJson, favicon] = await Promise.all([
+  await access(new URL("public/assets/dotlottie-player.wasm", root));
+  const [page, layout, styles, hosting, visuals, cardioRunner, cardioRunnerAsset, coreTrainer, coreTrainerAsset, activeWorkout, bootSequence, kineticField, pageTransition, planTransition, rankingTransition, kineticScene, kineticShaders, kineticIcons, trackSelect, trainingPlan, trainingDayStatus, packageJson, favicon] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
     readFile(new URL("app/layout.tsx", root), "utf8"),
     readFile(new URL("app/globals.css", root), "utf8"),
     readFile(new URL(".openai/hosting.json", root), "utf8"),
     readFile(new URL("components/track-visuals.tsx", root), "utf8"),
+    readFile(new URL("components/cardio-runner-lottie.tsx", root), "utf8"),
+    readFile(new URL("public/assets/cardio-runner.json", root), "utf8"),
+    readFile(new URL("components/core-trainer-lottie.tsx", root), "utf8"),
+    readFile(new URL("public/assets/core-trainer.json", root), "utf8"),
+    readFile(new URL("components/active-workout-view.tsx", root), "utf8"),
     readFile(new URL("components/app-boot-sequence.tsx", root), "utf8"),
     readFile(new URL("components/kinetic-field.tsx", root), "utf8"),
     readFile(new URL("components/kinetic-page-transition.tsx", root), "utf8"),
@@ -216,6 +222,186 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(styles, /\.exercise-picker-options \{ touch-action: pan-y/);
   assert.match(styles, /safe-area-inset-bottom/);
   assert.match(visuals, /export function TrackMark/);
+  assert.match(visuals, /export function ExerciseTypeMark/);
+  assert.match(visuals, /const resolvedCategory = category \?\? "strength"/);
+  assert.match(visuals, /resolvedCategory === "strength"[\s\S]+<TrackMark/);
+  assert.match(visuals, /is-\$\{resolvedCategory\}/);
+  assert.match(visuals, /import \{ CardioRunnerLottie \}/);
+  assert.match(visuals, /import \{ CoreTrainerLottie \}/);
+  assert.match(visuals, /<CardioRunnerLottie active=\{state === "syncing"\} \/>/);
+  assert.match(visuals, /<CoreTrainerLottie active=\{state === "syncing"\} \/>/);
+  assert.doesNotMatch(visuals, /cardio-runner-.+\.png|next\/image/);
+  assert.doesNotMatch(visuals, /exercise-type-core-(?:route|ring|braces|axis)/);
+  assert.ok((visuals.match(/viewBox="0 0 64 48"/g)?.length ?? 0) >= 1);
+  assert.ok((visuals.match(/aria-hidden="true"/g)?.length ?? 0) >= 3);
+  assert.match(activeWorkout, /exerciseCategory\(exercise\.exerciseId\)/);
+  assert.match(activeWorkout, /<ExerciseTypeMark category=\{category\} className="workout-watermark" state="syncing" \/>/);
+  assert.doesNotMatch(activeWorkout, /<TrackMark className="workout-watermark"/);
+  assert.match(cardioRunner, /@lottiefiles\/dotlottie-react/);
+  assert.match(cardioRunner, /setWasmUrl\("\/assets\/dotlottie-player\.wasm"\)/);
+  assert.match(cardioRunner, /src="\/assets\/cardio-runner\.json\?v=run-forrest-7"/);
+  assert.match(cardioRunner, /mode="forward"/);
+  assert.match(cardioRunner, /speed=\{0\.72\}/);
+  assert.match(cardioRunner, /useFrameInterpolation/);
+  assert.match(cardioRunner, /prefers-reduced-motion: reduce/);
+  assert.match(cardioRunner, /dotLottie\.play\(\)/);
+  assert.match(cardioRunner, /dotLottie\.pause\(\)/);
+  assert.match(cardioRunner, /dotLottie\.setFrame\(0\)/);
+  assert.match(cardioRunner, /addEventListener\("load", syncPlayback\)/);
+  assert.match(cardioRunner, /removeEventListener\("load", syncPlayback\)/);
+  assert.match(coreTrainer, /@lottiefiles\/dotlottie-react/);
+  assert.match(coreTrainer, /setWasmUrl\("\/assets\/dotlottie-player\.wasm"\)/);
+  assert.match(coreTrainer, /src="\/assets\/core-trainer\.json\?v=deadbug-1"/);
+  assert.match(coreTrainer, /mode="forward"/);
+  assert.match(coreTrainer, /speed=\{0\.85\}/);
+  assert.match(coreTrainer, /useFrameInterpolation/);
+  assert.match(coreTrainer, /prefers-reduced-motion: reduce/);
+  assert.match(coreTrainer, /dotLottie\.play\(\)/);
+  assert.match(coreTrainer, /dotLottie\.pause\(\)/);
+  assert.match(coreTrainer, /dotLottie\.setFrame\(0\)/);
+  assert.match(coreTrainer, /addEventListener\("load", syncPlayback\)/);
+  assert.match(coreTrainer, /removeEventListener\("load", syncPlayback\)/);
+  assert.match(packageJson, /"@lottiefiles\/dotlottie-react"/);
+
+  const cardioAnimation = JSON.parse(cardioRunnerAsset);
+  assert.equal(cardioAnimation.nm, "练迹有氧跑者");
+  assert.equal(cardioAnimation.meta.a, "Musa Adanur / 练迹适配");
+  assert.equal(cardioAnimation.meta.license, "Lottie Simple License");
+  assert.equal(
+    cardioAnimation.meta.source,
+    "https://lottiefiles.com/free-animation/run-forrest-run-MWGVhDv50J",
+  );
+  assert.equal(cardioAnimation.fr, 60);
+  assert.equal(cardioAnimation.ip, 43);
+  assert.equal(cardioAnimation.op, 77);
+  assert.equal(cardioAnimation.w, 800);
+  assert.equal(cardioAnimation.h, 800);
+  assert.deepEqual(
+    cardioAnimation.layers.map((layer) => layer.nm),
+    ["速度线 1", "速度线 2", "速度线 3", "orj"],
+  );
+
+  const speedLines = cardioAnimation.layers.slice(0, 3);
+  for (const speedLine of speedLines) {
+    assert.equal(speedLine.ks.o.a, 1);
+    assert.equal(speedLine.ks.p.a, 1);
+    const xPositions = speedLine.ks.p.k.map((keyframe) => keyframe.s[0]);
+    assert.ok(xPositions.every((position, index) => (
+      index === 0 || position <= xPositions[index - 1]
+    )));
+    assert.equal(
+      speedLine.shapes[0].it.find((shape) => shape.ty === "st").w.k,
+      10,
+    );
+  }
+  const speedLineWindows = speedLines.map((speedLine) => {
+    const opacityKeyframes = speedLine.ks.o.k;
+    const firstVisibleIndex = opacityKeyframes.findIndex((keyframe) => keyframe.s[0] > 0);
+    return {
+      name: speedLine.nm,
+      visible: opacityKeyframes[firstVisibleIndex].t,
+      exit: opacityKeyframes.slice(firstVisibleIndex + 1)
+        .find((keyframe) => keyframe.s[0] === 0).t,
+    };
+  });
+  assert.deepEqual(speedLineWindows.map(({ visible }) => visible), [60, 45, 51]);
+  const chronologicalSpeedLines = [...speedLineWindows]
+    .sort((left, right) => left.visible - right.visible);
+  assert.deepEqual(
+    chronologicalSpeedLines.map(({ name }) => name),
+    ["速度线 2", "速度线 3", "速度线 1"],
+  );
+  assert.notEqual(
+    chronologicalSpeedLines[1].visible - chronologicalSpeedLines[0].visible,
+    chronologicalSpeedLines[2].visible - chronologicalSpeedLines[1].visible,
+  );
+  assert.ok(chronologicalSpeedLines.slice(1).every((window, index) => (
+    window.visible < chronologicalSpeedLines[index].exit
+  )));
+
+  const runnerLayers = cardioAnimation.assets.find((asset) => asset.id === "comp_0").layers;
+  const animatedRunnerLayers = runnerLayers.filter((layer) => (
+    layer.ks?.p?.a === 1 || layer.ks?.r?.a === 1 || layer.ks?.s?.a === 1
+  ));
+  assert.ok(animatedRunnerLayers.length >= 13);
+
+  const fillShape = (layer) => (
+    layer.shapes[0].it.find((shape) => shape.ty === "fl")
+  );
+  const fillColor = (layer) => fillShape(layer).c.k;
+  const headLayer = runnerLayers.find((layer) => layer.nm === "kafa Outlines");
+  const torsoLayer = runnerLayers.find((layer) => layer.nm === "gov Outlines");
+  assert.deepEqual(fillColor(headLayer), [0.7451, 0.38824, 0.14118, 1]);
+  assert.deepEqual(fillColor(torsoLayer), [0.50588, 0.65098, 0.27059, 1]);
+  for (const layerIndex of [6, 7, 8, 9, 10, 11, 15, 16, 17, 18, 19, 20]) {
+    const layer = runnerLayers.find(({ ind }) => ind === layerIndex);
+    assert.deepEqual(fillColor(layer), [0.50588, 0.65098, 0.27059, 1]);
+    assert.equal(fillShape(layer).c.a, 0);
+  }
+  assert.deepEqual(
+    headLayer.ks.s.k.map((keyframe) => keyframe.s[0]),
+    [88, 96, 90, 96, 88],
+  );
+
+  const coreAnimation = JSON.parse(coreTrainerAsset);
+  assert.equal(coreAnimation.nm, "练迹核心训练者");
+  assert.equal(coreAnimation.meta.license, "Lottie Simple License");
+  assert.equal(
+    coreAnimation.meta.source,
+    "https://lottiefiles.com/free-animation/deadbug-fitness-exercise-vPDZn7efNC",
+  );
+  assert.equal(coreAnimation.fr, 60);
+  assert.equal(coreAnimation.ip, 0);
+  assert.equal(coreAnimation.op, 360);
+  assert.equal(coreAnimation.w, 1300);
+  assert.equal(coreAnimation.h, 1100);
+  assert.equal(coreAnimation.layers.length, 30);
+  assert.equal(coreAnimation.assets.length, 0);
+
+  const findFill = (shapes) => {
+    for (const shape of shapes ?? []) {
+      if (shape.ty === "fl") {
+        return shape;
+      }
+      const nestedFill = findFill(shape.it);
+      if (nestedFill) {
+        return nestedFill;
+      }
+    }
+    return null;
+  };
+  const coreLayerColor = (name) => (
+    findFill(coreAnimation.layers.find((layer) => layer.nm === name).shapes).c.k
+  );
+  for (const layerName of ["hand", "arm", "forearm", "head", "thigh", "calf"]) {
+    assert.deepEqual(coreLayerColor(layerName), [0.50588, 0.65098, 0.27059, 1]);
+  }
+  for (const layerName of ["hair", "head_shadow", "thigh_1", "calf_1", "arm_1"]) {
+    assert.deepEqual(coreLayerColor(layerName), [0.44314, 0.52941, 0.36078, 1]);
+  }
+  for (const layerName of ["body_skin", "shirt_shadow", "shirt", "body_shadow"]) {
+    assert.deepEqual(coreLayerColor(layerName), [0.7451, 0.38824, 0.14118, 1]);
+  }
+
+  assert.match(styles, /\.exercise-type-cardio-artboard/);
+  assert.match(styles, /\.exercise-type-cardio-player/);
+  assert.match(styles, /\.exercise-type-core-artboard/);
+  assert.match(styles, /\.exercise-type-core-player/);
+  assert.match(styles, /\.workout-watermark\.exercise-type-mark\.is-strength \{[^}]*color: #81a645;[^}]*opacity: \.48/);
+  assert.match(styles, /\.workout-watermark\.exercise-type-mark\.is-strength \.track-mark-route-base \{ stroke: #71875c/);
+  assert.match(styles, /\.workout-watermark\.exercise-type-mark\.is-strength \.track-mark-core-glow,[^}]*\.workout-watermark\.exercise-type-mark\.is-strength \.track-mark-endpoint \{ fill: #be6324/);
+  assert.match(styles, /\.workout-watermark\.exercise-type-mark\.is-strength \.track-mark-error \{ stroke: #be6324/);
+  assert.match(styles, /\.exercise-type-cardio-artboard \{[^}]*inset: -18%;[^}]*overflow: visible;[^}]*transform: translate3d\(18%, 0, 0\)/);
+  assert.match(styles, /\.exercise-type-cardio-player \{[^}]*opacity: \.92;[^}]*rgba\(129, 166, 69, \.08\)/);
+  assert.doesNotMatch(styles, /@property --cardio-|@keyframes workout-cardio-/);
+  assert.doesNotMatch(styles, /exercise-type-cardio-(?:arm|forearm|leg|shin|head|speed|torso|figure|layer)/);
+  assert.match(styles, /\.workout-watermark\.exercise-type-mark\.is-core \{ opacity: 1/);
+  assert.match(styles, /\.exercise-type-core-artboard \{[^}]*inset: -2%;[^}]*overflow: visible;[^}]*transform: translate3d\(-2%, 8%, 0\)/);
+  assert.match(styles, /\.exercise-type-core-player \{[^}]*opacity: \.88;[^}]*rgba\(129, 166, 69, \.07\)/);
+  assert.doesNotMatch(styles, /exercise-type-core-(?:route|ring|braces|axis)/);
+  assert.doesNotMatch(styles, /@keyframes workout-core-converge/);
+  assert.match(styles, /prefers-reduced-motion: reduce[\s\S]+workout-watermark\.track-mark\.state-syncing \.track-mark-route[\s\S]+stroke-dasharray: none !important/);
+  assert.match(styles, /\.workout-watermark \{ width: 140px; height: 140px; right: 0; \}/);
   assert.match(visuals, /export function TrainingStatusMark/);
   assert.match(bootSequence, /role=\{phase === "error" \? "alert" : "status"\}/);
   assert.match(bootSequence, />从断点重新同步<\/button>/);
@@ -253,9 +439,24 @@ test("生产构建包含练迹页面与真实数据 API", async () => {
   assert.match(trackSelect, /event\.pointerType === "mouse"/);
   assert.match(trackSelect, /className="exercise-picker-backdrop" onClick=\{close\}/);
   assert.doesNotMatch(trackSelect, /className="exercise-picker-backdrop" onPointerDown/);
+  assert.match(trackSelect, /className="exercise-picker-categories" role="group" aria-label="动作分类"/);
+  assert.match(trackSelect, /aria-pressed=\{category === item\.value\}/);
+  assert.match(trackSelect, /exerciseCategoryFilters\.map/);
+  assert.ok((trackSelect.match(/setCategory\("all"\)/g)?.length ?? 0) >= 3);
+  assert.match(trackSelect, /if \(!query\.trim\(\) && nextQuery\.trim\(\)\) setCategory\("all"\)/);
+  assert.match(trackSelect, /optionsRef\.current\.scrollTop = 0/);
+  assert.match(trackSelect, /该分类暂无动作/);
+  assert.match(trackSelect, /可以查看其他分类或使用搜索/);
+  assert.match(styles, /\.exercise-picker-categories \{[^}]+height: 44px[^}]+grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /\.exercise-picker-categories button \{[^}]+min-height: 44px/);
+  assert.match(styles, /\.exercise-picker-categories button\.is-active::after \{ opacity: 1/);
+  assert.match(styles, /\.exercise-picker-sheet \{[^}]+grid-template-rows: auto auto auto minmax\(0,1fr\)/);
+  assert.match(packageJson, /tests\/exercise-picker-category\.test\.ts/);
   assert.doesNotMatch(trainingPlan, /<select/);
   assert.match(trainingPlan, /<TrackSelect/);
   assert.match(trainingPlan, /<ExercisePicker/);
+  assert.doesNotMatch(trainingPlan, /addCustomExercise/);
+  assert.doesNotMatch(trainingPlan, /\/api\/exercises/);
   assert.match(trainingPlan, /<TrainingDayStatusControl/);
   assert.doesNotMatch(trainingPlan, /className="day-toggle"/);
   assert.match(trainingPlan, /currentScrollTop \+ editorTop - scrollerTop - fixedHeight/);

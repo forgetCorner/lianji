@@ -1,3 +1,7 @@
+import { CardioRunnerLottie } from "@/components/cardio-runner-lottie";
+import { CoreTrainerLottie } from "@/components/core-trainer-lottie";
+import type { ExerciseCategory } from "@/lib/exercise-category";
+
 type TrackMarkProps = {
   className?: string;
   label?: string;
@@ -27,6 +31,45 @@ export function TrackMark({ className = "", label, state = "idle" }: TrackMarkPr
       <circle className="track-mark-endpoint" cx="51" cy="20" r="2.6" />
       <path className="track-mark-error" d="M37 22l7-7" />
     </svg>
+  );
+}
+
+type ExerciseTypeMarkProps = {
+  category: ExerciseCategory | null;
+  className?: string;
+  state?: "idle" | "syncing";
+};
+
+export function ExerciseTypeMark({
+  category,
+  className = "",
+  state = "idle",
+}: ExerciseTypeMarkProps) {
+  const resolvedCategory = category ?? "strength";
+
+  if (resolvedCategory === "strength") {
+    return (
+      <TrackMark
+        className={`exercise-type-mark is-strength ${className}`.trim()}
+        state={state}
+      />
+    );
+  }
+
+  const svgClassName = `exercise-type-mark is-${resolvedCategory} state-${state} ${className}`.trim();
+
+  if (resolvedCategory === "cardio") {
+    return (
+      <span className={svgClassName} aria-hidden="true">
+        <CardioRunnerLottie active={state === "syncing"} />
+      </span>
+    );
+  }
+
+  return (
+    <span className={svgClassName} aria-hidden="true">
+      <CoreTrainerLottie active={state === "syncing"} />
+    </span>
   );
 }
 
